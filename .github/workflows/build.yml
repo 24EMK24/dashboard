@@ -16,6 +16,11 @@ on:
   # Also put a "Run workflow" button in the repo's Actions tab, so Eli can force
   # a rebuild by hand without waiting for the next scheduled run.
   workflow_dispatch:
+  # And rebuild whenever code is pushed to main, so a change to a panel or to
+  # config.json shows up on the live page straight away instead of waiting for
+  # the next scheduled run.
+  push:
+    branches: [main]
 
 # Permissions this workflow needs. GitHub gives a workflow nothing by default,
 # so publishing to Pages has to be asked for explicitly.
