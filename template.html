@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<!-- Tells phones to render at their real width. Without this, mobile browsers
+     pretend to be a ~980px desktop and shrink everything down to unreadable. -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Asks search engines not to list this page. The page is public (free GitHub
+     Pages requires a public repo), so this does not make it secret — it just
+     keeps it out of Google so nobody stumbles onto it. -->
+<meta name="robots" content="noindex, nofollow">
+<title>Eli's Dashboard</title>
+<style>
+  body {
+    font-family: -apple-system, "Segoe UI", sans-serif;
+    margin: 0; padding: 2rem; min-height: 100vh; color: #1a2b3c;
+    /* a soft sky gradient background so the page feels weather-y */
+    background: linear-gradient(160deg, #7cb2e8, #a9d0f5 40%, #dfeefc);
+  }
+  /* the page header: the title on the left, the universal Refresh button on the right */
+  .page-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; }
+  .page-head h1 { margin: 0; }
+
+  /* the dashboard is a grid of widgets. auto-fill + minmax lets as many widgets
+     as fit sit side by side, so the page doesn't become one tall scrolling column.
+     align-items: start keeps each widget its own natural (short) height. */
+  .grid {
+    display: grid; gap: 1.5rem; align-items: start;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  }
+
+  /* every widget sits on a frosted white card, sized to its content */
+  .panel {
+    background: rgba(255, 255, 255, 0.75);
+    border-radius: 18px; padding: 1rem 1.25rem;
+    box-shadow: 0 8px 24px rgba(30, 60, 110, 0.15);
+  }
+  /* the Refresh button */
+  #refresh-btn {
+    border: none; background: #2b7de0; color: #fff; cursor: pointer;
+    padding: 0.5rem 1rem; border-radius: 999px; font-size: 0.9rem;
+  }
+  #refresh-btn:hover { background: #1e63bd; }
+  #refresh-btn:disabled { opacity: 0.6; cursor: default; }
+
+  .updated { margin: 0.2rem 0 0.75rem; color: #4a6076; font-size: 0.8rem; }
+
+  /* the "right now" card — kept compact so the widget stays short */
+  .hero {
+    display: flex; align-items: center; gap: 0.9rem; margin-bottom: 0.9rem;
+    background: rgba(255, 255, 255, 0.6); border-radius: 14px; padding: 0.75rem 1rem;
+  }
+  .hero-emoji { font-size: 2.6rem; line-height: 1; }
+  .hero-temp { font-size: 2.3rem; font-weight: 700; line-height: 1; }
+  .hero-cond { font-size: 1rem; color: #33495e; }
+  .hero-rain { font-size: 0.85rem; color: #4a6076; }
+
+  /* the coming hours: ONE horizontal strip you scroll sideways for more. This is
+     what keeps the widget short instead of stacking 24 rows down the page. */
+  .hours { display: flex; flex-wrap: nowrap; gap: 0.5rem; overflow-x: auto; padding-bottom: 0.4rem; }
+  .day-label {
+    display: flex; align-items: center; flex: 0 0 auto; font-size: 0.75rem;
+    font-weight: 600; color: #33495e;
+    border-left: 2px solid rgba(43, 125, 224, 0.3); padding-left: 0.5rem; margin-left: 0.15rem;
+  }
+  .hour {
+    flex: 0 0 auto; min-width: 58px; text-align: center;
+    background: rgba(255, 255, 255, 0.7); border-radius: 12px; padding: 0.5rem 0.6rem;
+  }
+  .hour-time { font-size: 0.72rem; color: #4a6076; }
+  .hour-emoji { font-size: 1.3rem; }
+  .hour-temp { font-weight: 700; }
+  .hour-rain { font-size: 0.72rem; color: #2b7de0; }
+
+  /* stocks: one small card per ticker, each with a sparkline chart. The list has a
+     capped height and scrolls inside itself so the widget stays compact. */
+  .stocks-list { display: flex; flex-direction: column; gap: 0.5rem; max-height: 240px; overflow-y: auto; }
+  .stock {
+    display: flex; align-items: center; gap: 0.6rem;
+    background: rgba(255, 255, 255, 0.7); border-radius: 12px; padding: 0.5rem 0.7rem;
+  }
+  .stock-sym { font-weight: 700; width: 48px; flex: 0 0 auto; }
+  .spark { width: 110px; height: 34px; flex: 0 0 auto; }
+  .stock-nums { margin-left: auto; text-align: right; }
+  .stock-price { font-weight: 700; }
+  .stock-change { font-size: 0.78rem; }
+
+  /* youtube: a vertical list of video cards (thumbnail + title). Like the other
+     widgets it has a capped height and scrolls inside itself to stay compact. Both
+     the "New Today" and "Watch Later" widgets share this .yt-list / .yt-card styling. */
+  .yt-list { display: flex; flex-direction: column; gap: 0.6rem; max-height: 360px; overflow-y: auto; }
+  .yt-card {
+    display: flex; gap: 0.6rem;
+    background: rgba(255, 255, 255, 0.7); border-radius: 12px; padding: 0.5rem;
+  }
+  .yt-thumb-link { flex: 0 0 auto; }
+  .yt-thumb { width: 120px; height: 68px; object-fit: cover; border-radius: 8px; display: block; }
+  /* min-width: 0 lets the long title shrink and clamp instead of overflowing the card */
+  .yt-meta { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; flex: 1 1 auto; }
+  .yt-title {
+    font-size: 0.85rem; font-weight: 600; color: #1a2b3c; text-decoration: none;
+    /* clamp the title to two lines with an ellipsis so tall titles don't stretch the card */
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .yt-title:hover { text-decoration: underline; }
+  .yt-channel { font-size: 0.72rem; color: #4a6076; }
+  /* margin-top: auto pushes the buttons to the bottom of the card, lined up neatly */
+  .yt-actions { margin-top: auto; display: flex; gap: 0.4rem; align-items: center; }
+  .yt-save {
+    border: none; background: #2b7de0; color: #fff; cursor: pointer;
+    font-size: 0.72rem; padding: 0.25rem 0.5rem; border-radius: 999px;
+  }
+  .yt-save:hover { background: #1e63bd; }
+  .yt-save:disabled { opacity: 0.6; cursor: default; }
+  .yt-remove {
+    border: none; background: rgba(0, 0, 0, 0.08); color: #33495e; cursor: pointer;
+    font-size: 0.72rem; line-height: 1; padding: 0.25rem 0.45rem; border-radius: 999px;
+  }
+  .yt-remove:hover { background: #d64545; color: #fff; }
+  .yt-empty { color: #4a6076; font-size: 0.85rem; padding: 0.4rem 0; }
+
+  /* news: a vertical list of headlines grouped under each subject. Like the other
+     widgets it has a capped height and scrolls inside itself to stay compact. */
+  .news-list { display: flex; flex-direction: column; gap: 0.9rem; max-height: 420px; overflow-y: auto; }
+  /* each subject (e.g. "Seahawks") is a group: its heading plus today's stories */
+  .news-subject { display: flex; flex-direction: column; gap: 0.5rem; }
+  /* a subject heading — a small labelled divider before its stories */
+  .news-subject-title {
+    font-size: 0.78rem; font-weight: 700; color: #33495e;
+    border-left: 2px solid rgba(43, 125, 224, 0.3); padding-left: 0.5rem;
+  }
+  .news-story {
+    background: rgba(255, 255, 255, 0.7); border-radius: 12px; padding: 0.5rem 0.7rem;
+    display: flex; flex-direction: column; gap: 0.25rem;
+  }
+  .news-headline {
+    font-size: 0.85rem; font-weight: 600; color: #1a2b3c; text-decoration: none;
+    /* clamp long headlines to two lines so a tall one doesn't stretch the row */
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .news-headline:hover { text-decoration: underline; }
+  /* the little line under a headline: the source badge, the outlets, and the time */
+  .news-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; font-size: 0.72rem; color: #4a6076; }
+  .news-badge { border-radius: 999px; padding: 0.05rem 0.45rem; font-weight: 700; font-size: 0.68rem; }
+  .news-badge.multi { background: #d8f0dd; color: #1c7a35; }   /* 2+ outlets ran it */
+  .news-badge.single { background: rgba(0, 0, 0, 0.06); color: #4a6076; }  /* just one */
+  .news-src { min-width: 0; }
+  .news-time { white-space: nowrap; }
+  /* the ✕ delete for a story — pushed to the far right of the sub-line, styled like the
+     YouTube remove button so the two panels feel consistent. */
+  .news-remove {
+    margin-left: auto; border: none; background: rgba(0, 0, 0, 0.08); color: #33495e;
+    cursor: pointer; font-size: 0.72rem; line-height: 1; padding: 0.2rem 0.4rem; border-radius: 999px;
+  }
+  .news-remove:hover { background: #d64545; color: #fff; }
+  .news-empty { color: #4a6076; font-size: 0.85rem; padding: 0.1rem 0 0.2rem; }
+</style>
+</head>
+<body>
+<div class="page-head">
+<h1>Eli's Dashboard</h1>
+<!-- One button to refresh the whole dashboard. It re-fetches every widget that can
+     update live in the browser (weather); Python-built widgets (stocks, YouTube) stay put. -->
+<button id="refresh-btn" onclick="refreshAll()">Refresh &#8635;</button>
+</div>
+
+<!-- All widgets live in this grid so they sit side by side and each stays its
+     own compact height, instead of stacking into one tall scrolling column. -->
+<div class="grid">
+
+<section class="panel weather">
+  <h2>Weather · __LOCATION_NAME__</h2>
+  <!-- Python fills this in when the file is built; the Refresh button refills it live. -->
+  <div id="weather-body">
+__WEATHER_BODY__
+  </div>
+</section>
+
+<section class="panel stocks">
+__STOCKS__
+</section>
+
+<!-- "New Today": today's YouTube uploads. Python fills in the video cards; the
+     JavaScript below makes the ✕ and "+ Watch later" buttons work. -->
+<section class="panel youtube">
+__YOUTUBE__
+</section>
+
+<!-- News: recent Google News headlines for each subject Eli watches, with a badge
+     showing how many outlets carried the same story. Built by Python (panels/news.py). -->
+<section class="panel news">
+__NEWS__
+</section>
+
+<!-- "Watch Later": videos saved from the list above. This one is filled in entirely
+     by JavaScript from the browser's saved list (localStorage), because Python has no
+     way to know what Eli saved in the browser. Starts empty; the script populates it. -->
+<section class="panel watchlater">
+  <h2>Watch Later</h2>
+  <p class="updated">Saved videos stay here until you remove them.</p>
+  <div class="yt-list" id="watch-later-list"></div>
+</section>
+
+</div>
+
+<script>
+// ==================================================================
+// Weather Update button (unchanged from before)
+// ------------------------------------------------------------------
+// This JavaScript runs in the browser (no install needed). It re-fetches the
+// weather from Open-Meteo and rebuilds the weather card, so Eli gets the latest
+// prediction without re-running the Python script. It MIRRORS build_weather_panel()
+// in panels/weather.py — keep the two in sync.
+// ==================================================================
+
+// Eli's location, dropped in from the Python constants.
+const LATITUDE = __LAT__;
+const LONGITUDE = __LON__;
+
+// Same emoji/words map as weather_label() in Python.
+function weatherLabel(code) {
+  if (code === 0) return ["☀️", "Clear"];
+  if (code <= 2) return ["⛅", "Partly cloudy"];
+  if (code === 3) return ["☁️", "Overcast"];
+  if (code === 45 || code === 48) return ["🌫️", "Fog"];
+  if (code >= 51 && code <= 57) return ["🌦️", "Drizzle"];
+  if (code >= 61 && code <= 67) return ["🌧️", "Rain"];
+  if (code >= 71 && code <= 77) return ["❄️", "Snow"];
+  if (code >= 80 && code <= 82) return ["🌦️", "Showers"];
+  if (code >= 85 && code <= 86) return ["❄️", "Snow showers"];
+  if (code >= 95) return ["⛈️", "Thunderstorm"];
+  return ["🌡️", "—"];
+}
+
+// Same "14:00" -> "2 PM" conversion as to_ampm() in Python.
+function toAmPm(clock) {
+  let h = parseInt(clock.slice(0, 2), 10);
+  const suffix = h < 12 ? "AM" : "PM";
+  h = h % 12;
+  if (h === 0) h = 12;
+  return h + " " + suffix;
+}
+
+// Build the weather HTML from Open-Meteo data. Mirrors build_weather_panel().
+function buildWeatherHTML(data) {
+  const current = data.current;
+  const hourly = data.hourly;
+  const times = hourly.time;
+  const temps = hourly.temperature_2m;
+  const rain = hourly.precipitation_probability;
+  const codes = hourly.weather_code;
+
+  // Find where "now" starts so we skip hours already gone.
+  const currentHour = current.time.slice(0, 13) + ":00";
+  let start = 0;
+  while (start < times.length && times[start] < currentHour) start++;
+
+  const [nowEmoji, nowText] = weatherLabel(current.weather_code);
+  const updated = toAmPm(current.time.slice(11));
+  const nowRain = (rain[start] === null || rain[start] === undefined) ? 0 : rain[start];
+
+  let html = '<p class="updated">Updated ' + updated + '</p>';
+  html += '<div class="hero">';
+  html += '<div class="hero-emoji">' + nowEmoji + '</div>';
+  html += '<div class="hero-main">';
+  html += '<div class="hero-temp">' + Math.round(current.temperature_2m) + '°</div>';
+  html += '<div class="hero-cond">' + nowText + '</div>';
+  html += '<div class="hero-rain">Rain ' + nowRain + '%</div>';
+  html += '</div></div>';
+
+  html += '<div class="hours">';
+  let currentDay = "";
+  for (let i = start; i < start + 24 && i < times.length; i++) {
+    const dayPart = times[i].slice(0, 10);
+    const clockPart = times[i].slice(11);
+    if (dayPart !== currentDay) {
+      html += '<div class="day-label">' + dayPart + '</div>';
+      currentDay = dayPart;
+    }
+    const [emoji] = weatherLabel(codes[i]);
+    const r = (rain[i] === null || rain[i] === undefined) ? 0 : rain[i];
+    html += '<div class="hour">';
+    html += '<div class="hour-time">' + toAmPm(clockPart) + '</div>';
+    html += '<div class="hour-emoji">' + emoji + '</div>';
+    html += '<div class="hour-temp">' + Math.round(temps[i]) + '°</div>';
+    html += '<div class="hour-rain">' + r + '%</div>';
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+// Re-fetch the weather from Open-Meteo and rebuild just the weather card.
+async function refreshWeather() {
+  const body = document.getElementById("weather-body");
+  try {
+    const url = "https://api.open-meteo.com/v1/forecast"
+      + "?latitude=" + LATITUDE
+      + "&longitude=" + LONGITUDE
+      + "&current=temperature_2m,weather_code"
+      + "&hourly=temperature_2m,precipitation_probability,weather_code"
+      + "&temperature_unit=fahrenheit"
+      + "&timezone=America/Los_Angeles";
+    const response = await fetch(url);
+    const data = await response.json();
+    body.innerHTML = buildWeatherHTML(data);
+  } catch (e) {
+    // Fail soft, just like the Python side.
+    body.innerHTML = "<p>Could not update weather right now.</p>";
+  }
+}
+
+// The universal Refresh button. It refreshes every widget that CAN update live in
+// the browser — right now that is only weather. Stocks and YouTube are built by
+// Python, so they keep their "As of ..." data until the script is re-run; the button
+// leaves them untouched on purpose.
+async function refreshAll() {
+  const btn = document.getElementById("refresh-btn");
+  btn.disabled = true;
+  btn.innerHTML = "Refreshing…";
+  await refreshWeather();
+  btn.disabled = false;
+  btn.innerHTML = "Refresh &#8635;";
+}
+
+// ==================================================================
+// YouTube widgets: "New Today" deletions + "Watch Later" list
+// ------------------------------------------------------------------
+// A static HTML file has no server to remember things between runs, so we use the
+// browser's built-in localStorage — a small per-browser box that survives page
+// reloads. We keep two things in it:
+//   * which of today's videos Eli has dismissed (so a ✕ sticks for the rest of today)
+//   * his "Watch Later" list (which survives across days until he removes an item)
+// ==================================================================
+
+// The names we store our two things under. The "_v1" suffix lets us change the shape
+// later without clashing with old saved data.
+const LATER_KEY = "yt_watch_later_v1";
+const DISMISS_KEY = "yt_dismissed_v1";
+
+// Today's date as "YYYY-MM-DD" in Pacific — matches the date the Python side used to
+// pick today's videos. "en-CA" happens to format dates as YYYY-MM-DD; timeZone pins
+// it to Pacific no matter what the laptop's own clock is set to.
+function todayStr() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+}
+
+// Read a JSON value out of localStorage, returning a fallback if it's missing or junk.
+function loadJSON(key, fallback) {
+  try {
+    const saved = localStorage.getItem(key);
+    return saved ? JSON.parse(saved) : fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+
+// --- Watch Later storage ---
+function loadLater() { return loadJSON(LATER_KEY, []); }          // array of video objects
+function saveLater(items) { localStorage.setItem(LATER_KEY, JSON.stringify(items)); }
+
+// --- Dismissed-today storage ---
+// The list of video ids Eli dismissed today. We store it under today's date only.
+function getDismissedToday() {
+  const all = loadJSON(DISMISS_KEY, {});
+  return all[todayStr()] || [];
+}
+function setDismissedToday(ids) {
+  // Store ONLY today's dismissals, throwing away any other date. That is what makes a
+  // new day a clean slate: yesterday's "removed" videos are simply forgotten.
+  const obj = {};
+  obj[todayStr()] = ids;
+  localStorage.setItem(DISMISS_KEY, JSON.stringify(obj));
+}
+
+// Dismiss one of today's videos: hide its card and remember it for the rest of today.
+function dismissToday(btn) {
+  const card = btn.closest(".yt-card");   // the card this ✕ belongs to
+  const vid = card.dataset.vid;           // its video id (from the data-vid attribute)
+  const ids = getDismissedToday();
+  if (!ids.includes(vid)) {
+    ids.push(vid);
+    setDismissedToday(ids);
+  }
+  card.remove();          // take it off the page now
+  updateTodayEmpty();     // maybe show the "all caught up" note
+}
+
+// Save one of today's videos to Watch Later. The button passes itself in as `btn`, so
+// we climb up to its card with .closest() to read the card's data-* attributes.
+function saveForLater(btn) {
+  const card = btn.closest(".yt-card");
+  const video = {
+    video_id: card.dataset.vid,
+    title: card.dataset.title,
+    url: card.dataset.url,
+    thumbnail: card.dataset.thumb,
+    channel: card.dataset.channel
+  };
+  const items = loadLater();
+  // Don't add the same video twice.
+  if (!items.some(function (x) { return x.video_id === video.video_id; })) {
+    items.push(video);
+    saveLater(items);
+    renderWatchLater();
+  }
+  // Saving also removes the video from "New Today" (and remembers that for the rest of
+  // today, so it doesn't come back on reload) — the same effect as pressing ✕.
+  dismissToday(btn);
+}
+
+// Remove one video from Watch Later (only ever happens on its own ✕ press).
+function removeFromLater(videoId) {
+  const items = loadLater().filter(function (x) { return x.video_id !== videoId; });
+  saveLater(items);
+  renderWatchLater();
+}
+
+// Draw the whole Watch Later list from saved data. We build real elements and use
+// textContent for the title/channel, so a video title can never inject HTML.
+function renderWatchLater() {
+  const box = document.getElementById("watch-later-list");
+  const items = loadLater();
+  box.innerHTML = "";   // clear, then rebuild from scratch
+
+  if (items.length === 0) {
+    const note = document.createElement("p");
+    note.className = "yt-empty";
+    note.textContent = 'Nothing saved yet. Press "+ Watch later" on a video.';
+    box.appendChild(note);
+    return;
+  }
+
+  for (const v of items) {
+    const card = document.createElement("div");
+    card.className = "yt-card";
+
+    const thumbLink = document.createElement("a");
+    thumbLink.className = "yt-thumb-link";
+    thumbLink.href = v.url; thumbLink.target = "_blank"; thumbLink.rel = "noopener";
+    const img = document.createElement("img");
+    img.className = "yt-thumb"; img.src = v.thumbnail; img.alt = ""; img.loading = "lazy";
+    thumbLink.appendChild(img);
+
+    const meta = document.createElement("div");
+    meta.className = "yt-meta";
+    const title = document.createElement("a");
+    title.className = "yt-title";
+    title.href = v.url; title.target = "_blank"; title.rel = "noopener";
+    title.textContent = v.title;
+    const chan = document.createElement("div");
+    chan.className = "yt-channel";
+    chan.textContent = v.channel;
+    const actions = document.createElement("div");
+    actions.className = "yt-actions";
+    const remove = document.createElement("button");
+    remove.className = "yt-remove"; remove.title = "Remove";
+    remove.innerHTML = "&#10005;";
+    remove.onclick = function () { removeFromLater(v.video_id); };
+    actions.appendChild(remove);
+
+    meta.appendChild(title);
+    meta.appendChild(chan);
+    meta.appendChild(actions);
+    card.appendChild(thumbLink);
+    card.appendChild(meta);
+    box.appendChild(card);
+  }
+}
+
+// On page load, hide any of today's videos Eli already dismissed today.
+function applyDismissed() {
+  const ids = getDismissedToday();
+  const list = document.getElementById("yt-today-list");
+  if (!list) return;
+  for (const card of list.querySelectorAll(".yt-card")) {
+    if (ids.includes(card.dataset.vid)) card.remove();
+  }
+  updateTodayEmpty();
+}
+
+// Show an "all caught up" note if the New Today list has no visible cards left.
+function updateTodayEmpty() {
+  const list = document.getElementById("yt-today-list");
+  if (!list) return;
+  const hasCards = list.querySelector(".yt-card");
+  let note = list.querySelector(".yt-empty");
+  if (!hasCards) {
+    if (!note) {
+      note = document.createElement("p");
+      note.className = "yt-empty";
+      list.appendChild(note);
+    }
+    note.textContent = "All caught up for today.";
+  } else if (note) {
+    note.remove();
+  }
+}
+
+// ==================================================================
+// News widget: per-story ✕ delete (today-only, clean slate each day)
+// ------------------------------------------------------------------
+// Works just like the YouTube "New Today" deletions: the ids of the stories you dismiss
+// are kept in localStorage under TODAY's date only, so a ✕ sticks for the rest of today
+// (across reloads and rebuilds) and a new day forgets them — a clean slate. We reuse the
+// same todayStr() and loadJSON() helpers defined above.
+// ==================================================================
+
+const NEWS_DISMISS_KEY = "news_dismissed_v1";
+
+// The story ids dismissed today (stored under today's date only).
+function getDismissedNewsToday() {
+  const all = loadJSON(NEWS_DISMISS_KEY, {});
+  return all[todayStr()] || [];
+}
+function setDismissedNewsToday(ids) {
+  // Keep ONLY today's list, dropping any other date — that is what makes each new day
+  // start fresh (same trick as the YouTube dismissals).
+  const obj = {};
+  obj[todayStr()] = ids;
+  localStorage.setItem(NEWS_DISMISS_KEY, JSON.stringify(obj));
+}
+
+// Dismiss one story: hide its row and remember it for the rest of today.
+function dismissNews(btn) {
+  const story = btn.closest(".news-story");
+  const id = story.dataset.newsid;          // the story's link, used as its id
+  const ids = getDismissedNewsToday();
+  if (!ids.includes(id)) {
+    ids.push(id);
+    setDismissedNewsToday(ids);
+  }
+  const group = story.closest(".news-subject");
+  story.remove();                 // take it off the page now
+  updateNewsSubjectEmpty(group);  // maybe show "Nothing today." for this subject
+}
+
+// If a subject group has no stories left, show a short "Nothing today." note (once).
+function updateNewsSubjectEmpty(group) {
+  if (!group) return;
+  const hasStory = group.querySelector(".news-story");
+  let note = group.querySelector(".news-empty");
+  if (!hasStory && !note) {
+    note = document.createElement("p");
+    note.className = "news-empty";
+    note.textContent = "Nothing today.";
+    group.appendChild(note);
+  }
+}
+
+// On page load, hide any of today's stories already dismissed today, then tidy up any
+// subject that ends up empty.
+function applyDismissedNews() {
+  const list = document.getElementById("news-list");
+  if (!list) return;
+  const ids = getDismissedNewsToday();
+  for (const story of list.querySelectorAll(".news-story")) {
+    if (ids.includes(story.dataset.newsid)) story.remove();
+  }
+  for (const group of list.querySelectorAll(".news-subject")) {
+    updateNewsSubjectEmpty(group);
+  }
+}
+
+// Wire everything up once the page has loaded.
+window.addEventListener("DOMContentLoaded", function () {
+  applyDismissed();
+  renderWatchLater();
+  applyDismissedNews();
+});
+
+// ==================================================================
+// Auto-reload: pick up the newest build on its own
+// ------------------------------------------------------------------
+// The updater (Scheduled Task / loop script) re-runs main.py every 30 minutes, which
+// rewrites this dashboard.html file on disk. But an already-open browser tab keeps
+// showing the OLD version until it reloads. We get the tab to reload itself two ways:
+//
+//   1. A timer, every 30 minutes, matching the rebuild schedule.
+//   2. Whenever the tab comes back into view (you switch to it, unlock the phone, or
+//      wake the laptop). This is the important one: browsers FREEZE the timer above
+//      while a tab is in the background or the machine is asleep, so after a few hours
+//      away the timer may never have fired and the page is stale (the "as of 8pm at
+//      11pm" problem). Reloading the moment you look at it fixes that.
+//
+// To avoid reloading pointlessly (e.g. every quick tab-switch), the view-based reload
+// only fires if it has been at least RELOAD_MINUTES since this page last loaded.
+// Reloading re-reads the file from disk; deletions and the Watch Later list are safe
+// because those live in localStorage, which survives reloads.
+const RELOAD_MINUTES = 30;
+const pageLoadedAt = Date.now();  // when this particular page view started
+
+// 1. The plain timer (works while the tab is active and awake).
+setTimeout(function () {
+  location.reload();
+}, RELOAD_MINUTES * 60 * 1000);
+
+// 2. Reload on return-to-view, but only if the page is already stale.
+document.addEventListener("visibilitychange", function () {
+  // visibilityState becomes "visible" when the tab is brought to the front / the
+  // screen wakes. document.hidden is false at that moment.
+  if (document.hidden) return;                       // ignore going AWAY from the tab
+  const minutesOpen = (Date.now() - pageLoadedAt) / 60000;
+  if (minutesOpen >= RELOAD_MINUTES) {
+    location.reload();                               // it's old — grab the fresh build
+  }
+});
+</script>
+</body>
+</html>

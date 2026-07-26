@@ -1,0 +1,24 @@
+# Virtual environment — recreate from requirements.txt, never commit
+.venv/
+
+# Generated output — the dashboard is built by the script, not stored in git
+dashboard.html
+
+# Cached API responses — local scratch, not source
+cache/
+
+# Secrets — never commit credentials
+.env
+codes
+
+# Private session notes — kept off the public repo by Eli's choice (2026-07-26).
+# The build never reads these; they exist only as memory between AI sessions.
+.planning/
+
+# Local Claude Code tooling — not part of the build, and its hardcoded paths
+# point at .planning/, which isn't in the repo, so it wouldn't work elsewhere.
+.claude/
+
+# Python bytecode
+__pycache__/
+*.pyc

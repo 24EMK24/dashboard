@@ -1,0 +1,109 @@
+# Rebuilds the dashboard in the cloud and publishes it to GitHub Pages.
+#
+# Why this file exists: main.py has to re-run for stocks/YouTube/news to refresh.
+# On the laptop that job belonged to a Windows Scheduled Task, which cannot run
+# while the laptop is asleep (proven 2026-07-25: a 28-hour sleep left Eli looking
+# at a day-old page). GitHub runs this on their machines instead, so the laptop
+# being closed no longer matters.
+
+name: Build dashboard
+
+on:
+  # Rebuild on a timer. The five fields are: minute hour day month weekday.
+  # "*/30 * * * *" means "every 30 minutes, every hour, every day".
+  schedule:
+    - cron: "*/30 * * * *"
+  # Also put a "Run workflow" button in the repo's Actions tab, so Eli can force
+  # a rebuild by hand without waiting for the next scheduled run.
+  workflow_dispatch:
+
+# Permissions this workflow needs. GitHub gives a workflow nothing by default,
+# so publishing to Pages has to be asked for explicitly.
+permissions:
+  contents: read    # read the project files
+  pages: write      # publish to GitHub Pages
+  id-token: write   # required by the deploy-pages action to prove who it is
+
+# If a run is still going when the next one starts, queue the new one instead of
+# running both at once. Two builds publishing to Pages together can clash.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest   # a fresh Linux machine, rented free for this run
+
+    # Tells GitHub this job is the thing that deploys to Pages, and records the
+    # published URL on the run's summary page.
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    # A healthy build is ~2 minutes. If a run is still going after 20 the feeds
+    # are badly throttled and it is stuck — kill it rather than let it hang.
+    timeout-minutes: 20
+
+    steps:
+      # 1. Copy the project files onto the runner.
+      - name: Get the project files
+        uses: actions/checkout@v4
+
+      # 2. Install Python. "cache: pip" saves the downloaded packages between
+      #    runs so the install step is fast after the first time.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install the libraries from requirements.txt
+        run: pip install -r requirements.txt
+
+      # 3. Bring back the previous run's cache/ folder.
+      #    IMPORTANT: panels/youtube.py and panels/news.py protect against
+      #    throttling by reading the PREVIOUS cache/*.json and carrying a
+      #    channel's or subject's last-known items forward when a feed returns
+      #    nothing. Every run gets a brand-new empty machine, so without this
+      #    step that safety net silently would not work at all, and a single
+      #    throttled run could blank a whole widget.
+      #    "restore-keys" means: if there is no exact match, take the most
+      #    recent cache whose name starts with "dashboard-cache-".
+      - name: Restore the previous run's cached feed data
+        uses: actions/cache/restore@v4
+        with:
+          path: cache
+          key: dashboard-cache-${{ github.run_id }}
+          restore-keys: |
+            dashboard-cache-
+
+      # 4. The actual build — same command Eli runs locally. Writes dashboard.html.
+      - name: Build the dashboard
+        run: python main.py
+
+      # 5. Save cache/ for the next run. "if: always()" so the data is still kept
+      #    even if a later step fails.
+      - name: Save the cached feed data for next time
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: cache
+          key: dashboard-cache-${{ github.run_id }}
+
+      # 6. GitHub Pages serves a folder, and looks for "index.html" as the page
+      #    people land on. So put the freshly built dashboard in an empty folder
+      #    under that name.
+      - name: Put the built page into a folder for Pages
+        run: |
+          mkdir -p _site
+          cp dashboard.html _site/index.html
+
+      # 7. Hand that folder to Pages and publish it.
+      - name: Package the folder for Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Publish to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,43 @@
+{
+  "location": { "name": "Seattle", "lat": 47.61, "lon": -122.33 },
+  "tickers": ["AAPL", "MSFT", "NVDA"],
+  "youtube_channels": [
+    { "name": "Asmongold TV",        "channel_id": "UCQeRaTukNYft1_6AZPACnog" },
+    { "name": "Asmongold Clips",     "channel_id": "UCMwJJL5FJFuTRT55ksbQ4GQ" },
+    { "name": "penguinz0",           "channel_id": "UCq6VFHwMzcMXbuKyG7SQYIg" },
+    { "name": "diesel patches",      "channel_id": "UCQmWt938Z8TkdPq6uasdlbA" },
+    { "name": "WestJett",            "channel_id": "UCZIuYUzkmEXgSSXzReOmeLw" },
+    { "name": "MKBHD",               "channel_id": "UCBJycsmduvYEL83R_U4JriQ" },
+    { "name": "Mrwhosetheboss",      "channel_id": "UCMiJRAwDNSNzuYeN2uWa0pA" },
+    { "name": "NakeyJakey",          "channel_id": "UCSdma21fnJzgmPodhC9SJ3g" },
+    { "name": "Internet Historian",  "channel_id": "UCR1D15p_vdP3HkrH8wgjQRw" },
+    { "name": "Incognito Mode",      "channel_id": "UC8Q7XEy86Q7T-3kNpNjYgwA" },
+    { "name": "OverSimplified",      "channel_id": "UCNIuvl7V8zACPpTmmNIqP2A" },
+    { "name": "Brew",                "channel_id": "UCVQGtUcRjHTQLTTu-5s9_4Q" },
+    { "name": "Patrick Cc:",         "channel_id": "UC-mP1nlk0qOutA08zuQHORA" },
+    { "name": "Turkey Tom",          "channel_id": "UCDKJdFer1phQI95UinPZehw" },
+    { "name": "fern",                "channel_id": "UCODHrzPMGbNv67e84WDZhQQ" },
+    { "name": "Zach Star Himself",   "channel_id": "UC2O2xML7kL6Rbv3fjyi74xA" },
+    { "name": "Casually Explained",  "channel_id": "UCr3cBLTYmIK9kY0F_OdFWFQ" },
+    { "name": "Sydney Watson",       "channel_id": "UCSFy-1JrpZf0tFlRZfo-Rvw" },
+    { "name": "Nerdrotic",           "channel_id": "UC5T0tXJN5CrMZUEJuz4oovw" },
+    { "name": "The Critical Drinker", "channel_id": "UCSJPFQdZwrOutnmSFYtbstA" },
+    { "name": "ThatsGoodSports",     "channel_id": "UCew5br5cO1ZKO7Z_F1WA8Bg" },
+    { "name": "Tom Grossi",          "channel_id": "UCg6jOxpPC46mnBs9NsgLcvg" },
+    { "name": "big boss",            "channel_id": "UCYGDiVemmhY_Q1M-hKp4fvw" },
+    { "name": "Reckless Ben",        "channel_id": "UC_UE7maDDe8OqqC8-TtXaKg" },
+    { "name": "PointlessHub",        "channel_id": "UCKNbAYjhxVS5Y8p3FhhUxoA" }
+  ],
+  "news_subjects": [
+    { "name": "Top news",      "query": "" },
+    { "name": "Seattle",       "query": "Seattle" },
+    { "name": "Seahawks",      "query": "Seattle Seahawks" },
+    { "name": "Mariners",      "query": "Seattle Mariners" },
+    { "name": "NFL",           "query": "NFL" },
+    { "name": "Technology",    "query": "technology" },
+    { "name": "Gaming",        "query": "video games" },
+    { "name": "Entertainment", "query": "entertainment" },
+    { "name": "Half-Life 3",   "query": "Half-Life 3" },
+    { "name": "Sly Cooper 5",  "query": "Sly Cooper 5" }
+  ]
+}
