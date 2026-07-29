@@ -179,6 +179,10 @@ Split into a **`panels/` package** (done at panel three, 2026-07-22). Layout:
   the raw response). **It is an undocumented API** — the one ESPN's own site calls — so expect
   it to break someday; the fail-soft wrapper and the per-team `try` handle that, and one
   team failing still renders the other.
+  **CONFIRMED 2026-07-28: ESPN does not throttle GitHub's runner IP** — cloud run #25 fetched
+  both teams from an empty cache and rendered correctly. That was a genuine risk worth
+  retesting if scores ever go blank in the cloud but work locally, since YouTube and Google
+  have both throttled shared IPs on this project before.
   **`SCORES_MAX_AGE = 300` (5 min) deliberately differs from `CACHE_MAX_AGE`** — a 15-minute-old
   score is several innings behind, and the 15-minute rule exists to avoid YouTube/Google
   throttling, which does not apply to two small ESPN requests.
@@ -325,6 +329,7 @@ TBD — will be filled in as commands, routes, or user-facing operations are imp
 | --- | --- |
 | **v1** | Weather + stocks + YouTube + news panels, generated as a local `dashboard.html` opened on the laptop. **COMPLETE as of 2026-07-23.** |
 | **v2** | Reachable from Eli's phone, not dependent on Windows. **COMPLETE as of 2026-07-26** — GitHub Actions rebuilds on a schedule and publishes to GitHub Pages at **https://24emk24.github.io/dashboard/**. First cloud build passed on the first attempt; phone confirmed by Eli; laptop updater retired the same day. Refresh cadence was found to be far worse than the cron claimed and was reworked on 2026-07-27 (see the workflow notes above). |
+| **Score keeper** | Mariners + Seahawks scores at the top of the page (`panels/scores.py`). **Added 2026-07-28 on Eli's direct request**, outside the v1/v2/v3 tiers — it is not scope creep and it is not a v3 feature. Needs no key, no account and no new dependency (`requests` was already pinned), so it did not pull the project toward the server/database complexity v3 is holding back. |
 | **v3** | Price-drop alerts, notifications, and/or true cross-device state sync. The genuinely hard, optional tier. **Not started — do not begin any of it unprompted.** Note that `localStorage` (deletions, Watch Later) is per-browser AND per-origin, so laptop and phone each keep their own; real sync needs a backend, which the project has deliberately avoided so far. |
 
 ## Session Protocol
