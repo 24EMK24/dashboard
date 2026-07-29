@@ -154,6 +154,78 @@
   }
   .news-remove:hover { background: #d64545; color: #fff; }
   .news-empty { color: #4a6076; font-size: 0.85rem; padding: 0.1rem 0 0.2rem; }
+
+  /* The freshness strip under the page title: when each source was last fetched, a live
+     countdown to the next real re-fetch, and a link to start a rebuild by hand.
+     "flex-wrap: wrap" lets it fold onto extra lines on a phone instead of overflowing. */
+  .fresh-strip {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.9rem;
+    margin: 0 0 0.9rem; padding: 0.45rem 0.7rem; border-radius: 8px;
+    background: rgba(255, 255, 255, 0.75); border: 1px solid #d7e2ec;
+    font-size: 0.78rem; color: #4a6076;
+  }
+  .fresh-items { display: flex; flex-wrap: wrap; gap: 0.4rem 0.8rem; }
+  .fresh-item b { color: #23384b; font-weight: 600; }
+  /* The countdown line. .is-ready turns it green once a forced rebuild would really
+     fetch new data — the one moment the manual button is worth pressing. */
+  .fresh-next { margin-left: auto; }
+  .fresh-next.is-ready { color: #1c7c4a; font-weight: 600; }
+  .fresh-run {
+    color: #23384b; text-decoration: none; border: 1px solid #c3d3e0;
+    border-radius: 999px; padding: 0.15rem 0.55rem; background: #fff; white-space: nowrap;
+  }
+  .fresh-run:hover { background: #23384b; color: #fff; border-color: #23384b; }
+  /* On a narrow phone the countdown should start its own line rather than being
+     squeezed against the link. */
+  @media (max-width: 560px) {
+    .fresh-next { margin-left: 0; }
+  }
+
+  /* The score keeper above the widget grid. The cards sit in a row and share the width
+     evenly; "flex-wrap: wrap" drops them onto separate lines on a narrow phone.
+     "flex: 1 1 240px" means: grow to share the space, shrink if needed, and start from
+     240px — below that there isn't room for two, so they stack. */
+  .scores-strip {
+    display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 0 0 1.4rem;
+  }
+  .score-card {
+    flex: 1 1 240px; min-width: 0;
+    background: rgba(255, 255, 255, 0.85); border: 1px solid #d7e2ec;
+    border-radius: 10px; padding: 0.55rem 0.75rem;
+  }
+  .score-head { display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.4rem; }
+  .score-team { font-weight: 700; color: #23384b; font-size: 0.95rem; }
+  /* Record and league position, pushed to the right-hand end of the heading. */
+  .score-record { font-size: 0.7rem; color: #6a819a; margin-left: auto; text-align: right; }
+
+  .score-line { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; }
+  /* The little W / L / LIVE badge in front of the score. */
+  .score-pill {
+    font-size: 0.66rem; font-weight: 700; letter-spacing: 0.02em;
+    border-radius: 999px; padding: 0.12rem 0.42rem;
+    background: #e6edf4; color: #4a6076;
+  }
+  .score-win { background: #1a9e5f; color: #fff; }
+  .score-loss { background: #d64545; color: #fff; }
+  /* A game in progress. The slow pulse is what makes "this is happening now" obvious
+     at a glance without needing to read the words. */
+  .score-live { background: #d64545; color: #fff; animation: score-pulse 2s ease-in-out infinite; }
+  @keyframes score-pulse { 50% { opacity: 0.45; } }
+  /* Some people find moving things on a page uncomfortable, and browsers let them say
+     so in their settings. This turns the pulse off for them. */
+  @media (prefers-reduced-motion: reduce) {
+    .score-live { animation: none; }
+  }
+
+  .score-nums { font-size: 1.15rem; font-weight: 700; color: #23384b; }
+  .score-vs { font-size: 0.85rem; color: #33495e; }
+  /* The date of a finished game, or the inning/quarter of a live one. */
+  .score-when { font-size: 0.7rem; color: #6a819a; margin-left: auto; }
+  .score-next { font-size: 0.75rem; color: #4a6076; margin-top: 0.3rem; }
+  .score-empty { font-size: 0.8rem; color: #4a6076; }
+  /* When the scores were really fetched. flex-basis:100% forces it onto its own line
+     underneath the cards. */
+  .score-stamp { flex-basis: 100%; font-size: 0.68rem; color: #6a819a; }
 </style>
 </head>
 <body>
@@ -163,6 +235,17 @@
      update live in the browser (weather); Python-built widgets (stocks, YouTube) stay put. -->
 <button id="refresh-btn" onclick="refreshAll()">Refresh &#8635;</button>
 </div>
+
+<!-- How old the data is, and whether forcing a rebuild would actually fetch anything new.
+     Python (panels/freshness.py) fills in the times; the countdown ticks in the script
+     at the bottom of this file. -->
+__FRESHNESS__
+
+<!-- The score keeper: Mariners and Seahawks. Sits above the widget grid because it is
+     the thing Eli wants to see first. Built by Python (panels/scores.py); it is a plain
+     strip rather than a grid widget so it stays one short row and doesn't push the
+     widgets down the page. -->
+__SCORES__
 
 <!-- All widgets live in this grid so they sit side by side and each stays its
      own compact height, instead of stacking into one tall scrolling column. -->
@@ -570,10 +653,74 @@ window.addEventListener("DOMContentLoaded", function () {
 });
 
 // ==================================================================
+// Freshness countdown (the strip under the page title)
+// ------------------------------------------------------------------
+// Python wrote, into #fresh-data, the moment each source was last really fetched and the
+// moment its saved copy goes stale (15 minutes later — see CACHE_MAX_AGE in
+// panels/common.py). This turns those fixed numbers into a live countdown, which a static
+// page could not do on its own: the text Python writes starts ageing the second it is
+// written, and this tab may sit open for hours.
+//
+// What it is for: knowing whether pressing "Run a rebuild" is worth it. While every cache
+// is still fresh a rebuild republishes the SAME videos and headlines, so the countdown
+// tells you how long until a plain rebuild would fetch for real.
+
+// The times Python left for us. JSON.parse turns that text back into a JavaScript array.
+// Wrapped in a check because the strip is allowed to be missing (it fails soft to "").
+const freshDataEl = document.getElementById("fresh-data");
+const freshNextEl = document.getElementById("fresh-next");
+const freshSources = freshDataEl ? JSON.parse(freshDataEl.dataset.sources) : [];
+
+function formatGap(milliseconds) {
+  // Turn a length of time into "7m 12s" (or just "12s" under a minute).
+  const totalSeconds = Math.max(0, Math.round(milliseconds / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? minutes + "m " + seconds + "s" : seconds + "s";
+}
+
+function updateFreshness() {
+  if (!freshNextEl) return;              // no strip on the page — nothing to update
+  const now = Date.now();
+
+  // The soonest moment any source's saved copy goes stale. A source with no cache file
+  // at all (expires === null) counts as due right now, so it reports as ready.
+  let soonestExpiry = null;
+  for (const source of freshSources) {
+    if (source.expires === null) { soonestExpiry = now; break; }
+    if (soonestExpiry === null || source.expires < soonestExpiry) {
+      soonestExpiry = source.expires;
+    }
+  }
+
+  if (soonestExpiry === null) {
+    freshNextEl.textContent = "";        // nothing cached to report on
+    return;
+  }
+
+  if (now >= soonestExpiry) {
+    // The cache has aged out, so the next build — scheduled or manual — fetches for real.
+    freshNextEl.textContent = "Ready · a rebuild will fetch new data";
+    freshNextEl.classList.add("is-ready");
+  } else {
+    // Still inside the 15-minute window. Say how long is left, and point out the escape
+    // hatch: the force_refresh box on the Run-workflow button ignores the cache entirely.
+    freshNextEl.textContent = "New data in " + formatGap(soonestExpiry - now)
+                            + " · sooner only with force_refresh";
+    freshNextEl.classList.remove("is-ready");
+  }
+}
+
+// Tick once a second. Cheap, and it keeps the countdown honest while the tab is open.
+updateFreshness();
+setInterval(updateFreshness, 1000);
+
+// ==================================================================
 // Auto-reload: pick up the newest build on its own
 // ------------------------------------------------------------------
-// The updater (Scheduled Task / loop script) re-runs main.py every 30 minutes, which
-// rewrites this dashboard.html file on disk. But an already-open browser tab keeps
+// GitHub Actions re-runs main.py in the cloud and republishes this page (six scheduled
+// slots an hour, though GitHub drops many of them — see .github/workflows/build.yml).
+// But an already-open browser tab keeps
 // showing the OLD version until it reloads. We get the tab to reload itself two ways:
 //
 //   1. A timer, every 30 minutes, matching the rebuild schedule.

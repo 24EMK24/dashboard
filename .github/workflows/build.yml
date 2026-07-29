@@ -10,12 +10,39 @@ name: Build dashboard
 
 on:
   # Rebuild on a timer. The five fields are: minute hour day month weekday.
-  # "*/30 * * * *" means "every 30 minutes, every hour, every day".
+  # This says "at 3, 13, 23, 33, 43 and 53 minutes past every hour" — six chances an hour.
+  #
+  # WHY SIX SLOTS INSTEAD OF THE OBVIOUS "*/30" (measured 2026-07-27): GitHub runs
+  # scheduled workflows on free public repos at the LOWEST priority and simply DROPS them
+  # when its machines are busy. It never reports an error — the run just never happens.
+  # With "*/30" the dashboard was rebuilding roughly every TWO HOURS instead of every 30
+  # minutes: 12 runs in 24.5 hours instead of the expected 48, with gaps up to 241 min.
+  # Two things fix that here:
+  #   1. Odd minutes. "*/30" fires at :00 and :30, the two busiest minutes on the whole
+  #      platform, so those are the runs most likely to be dropped. 3/13/23/… avoids the
+  #      stampede.
+  #   2. More attempts. Each slot is an independent chance to fire, so even when most are
+  #      dropped the page still refreshes far more often.
+  # This costs nothing: Actions minutes are UNLIMITED on a public repo and a build is ~2
+  # minutes. It does not hammer YouTube either — panels only re-fetch when their 15-minute
+  # cache is stale (see CACHE_MAX_AGE in panels/common.py), so extra builds mostly just
+  # re-publish the same data. Six an hour also stays under GitHub Pages' soft limit of ten
+  # builds per hour, which is why this does not go every 5 minutes.
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "3,13,23,33,43,53 * * * *"
   # Also put a "Run workflow" button in the repo's Actions tab, so Eli can force
   # a rebuild by hand without waiting for the next scheduled run.
   workflow_dispatch:
+    # Options shown next to that button. A plain manual run reuses anything fetched in
+    # the last 15 minutes, so pressing the button right after a build would republish the
+    # SAME videos and headlines. Ticking this box makes the run ignore the cache and
+    # actually go and fetch. Leave it unticked unless the data really looks stuck —
+    # re-fetching 25 YouTube feeds and 10 news feeds back-to-back is what gets us throttled.
+    inputs:
+      force_refresh:
+        description: "Ignore the 15-minute cache and re-fetch everything"
+        type: boolean
+        default: false
   # And rebuild whenever code is pushed to main, so a change to a panel or to
   # config.json shows up on the live page straight away instead of waiting for
   # the next scheduled run.
@@ -83,8 +110,15 @@ jobs:
             dashboard-cache-
 
       # 4. The actual build — same command Eli runs locally. Writes dashboard.html.
+      #    "env:" hands the script an environment variable — a named value the program can
+      #    read as it starts. FORCE_REFRESH is "true" only when this run came from the
+      #    Run-workflow button WITH the force_refresh box ticked; on a scheduled or push
+      #    run, inputs.force_refresh is empty and this is just "". panels/common.py checks
+      #    it in force_refresh_requested() and skips the 15-minute cache when it is set.
       - name: Build the dashboard
         run: python main.py
+        env:
+          FORCE_REFRESH: ${{ inputs.force_refresh }}
 
       # 5. Save cache/ for the next run. "if: always()" so the data is still kept
       #    even if a later step fails.

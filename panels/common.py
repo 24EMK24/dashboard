@@ -32,6 +32,7 @@ def load_config():
         "tickers": ["AAPL", "MSFT", "NVDA"],
         "youtube_channels": [],   # no channels by default; Eli lists his in config.json
         "news_subjects": [],      # no news subjects by default; Eli lists his in config.json
+        "sports_teams": [],       # no teams by default; Eli lists his in config.json
     }
     try:
         with open("config.json", "r", encoding="utf-8") as f:
@@ -55,6 +56,9 @@ def load_config():
         # Each news subject is a small dict: {"name": ..., "query": "..."} — the query is
         # what we search Google News for. An empty query means "top stories".
         "news_subjects": config.get("news_subjects", defaults["news_subjects"]),
+        # Each team is a dict: {"name", "sport", "league", "team"} — the last three are
+        # the words ESPN's address needs, e.g. baseball / mlb / sea.
+        "sports_teams": config.get("sports_teams", defaults["sports_teams"]),
     }
 
 
@@ -66,6 +70,7 @@ LONGITUDE = _config["location"]["lon"]
 TICKERS = _config["tickers"]                   # the stock tickers to show
 YOUTUBE_CHANNELS = _config["youtube_channels"] # the YouTube channels to follow
 NEWS_SUBJECTS = _config["news_subjects"]       # the news subjects to watch on Google News
+SPORTS_TEAMS = _config["sports_teams"]         # the teams whose scores show at the top
 
 
 # ---------------------------------------------------------------------------
@@ -78,8 +83,31 @@ NEWS_SUBJECTS = _config["news_subjects"]       # the news subjects to watch on G
 
 CACHE_DIR = "cache"   # folder where cached responses are saved (already gitignored)
 
+# How long a cached fetch stays usable, in seconds (900 = 15 minutes). Every panel that
+# caches uses this same number, and so does the freshness strip at the top of the page —
+# keeping it in ONE place means the countdown Eli sees can never disagree with the real
+# rule the panels follow.
+CACHE_MAX_AGE = 900
 
-def get_cached(name, fetch_function, max_age_seconds):
+
+def force_refresh_requested():
+    # True when the build was told to ignore the cache and re-fetch everything.
+    #
+    # Why this exists: the cloud build normally reuses anything fetched in the last 15
+    # minutes (see get_cached below). That is the right default — it stops us hammering
+    # YouTube and Google. But it also meant pressing "Run workflow" by hand right after a
+    # build would rebuild the page from the SAME saved data, so the manual button looked
+    # broken. The workflow now sets FORCE_REFRESH=1 when Eli ticks its "force_refresh"
+    # box, and this switch makes that run fetch for real.
+    #
+    # It reads an ENVIRONMENT VARIABLE — a named value the surrounding system (here, the
+    # GitHub Actions workflow) hands to the program when it starts. os.environ.get returns
+    # "" if it was never set, so a normal run is unaffected.
+    value = os.environ.get("FORCE_REFRESH", "").strip().lower()
+    return value in ("1", "true", "yes", "on")
+
+
+def get_cached(name, fetch_function, max_age_seconds=CACHE_MAX_AGE):
     # Return the saved data in cache/<name>.json if it was written less than
     # max_age_seconds ago. Otherwise call fetch_function(), save what it returns,
     # and return that. We pass the fetch in as a function so this one cache can wrap
@@ -88,7 +116,10 @@ def get_cached(name, fetch_function, max_age_seconds):
     path = os.path.join(CACHE_DIR, name + ".json")    # e.g. "cache/stocks.json"
 
     # If a saved copy exists and is still fresh, read it and return — no fetch.
-    if os.path.exists(path):
+    # A forced refresh skips this shortcut so we always go and fetch. Note it does NOT
+    # delete the file: the throttle protection in youtube.py/news.py reads the previous
+    # cache to carry channels forward, so the old copy must stay put until we overwrite it.
+    if os.path.exists(path) and not force_refresh_requested():
         age_seconds = time.time() - os.path.getmtime(path)   # how old the file is
         if age_seconds < max_age_seconds:
             with open(path, "r", encoding="utf-8") as f:
@@ -108,3 +139,25 @@ def cached_time_label(name):
     path = os.path.join(CACHE_DIR, name + ".json")
     when = datetime.fromtimestamp(os.path.getmtime(path), ZoneInfo("America/Los_Angeles"))
     return when.strftime("%I:%M %p").lstrip("0")
+
+
+def cache_status(name, max_age_seconds=CACHE_MAX_AGE):
+    # Describe the state of one cached source, for the freshness strip at the top of the
+    # page. Returns a small dict:
+    #   label   -> "5:12 PM", when this data was really fetched (or "never")
+    #   fetched -> that same moment as an epoch number in MILLISECONDS, or None
+    #   expires -> the epoch (ms) when the cache goes stale and a re-run would fetch again
+    # Milliseconds because the countdown that uses these is JavaScript, and JavaScript
+    # measures time in milliseconds while Python uses seconds.
+    path = os.path.join(CACHE_DIR, name + ".json")
+    try:
+        fetched_seconds = os.path.getmtime(path)
+    except OSError:
+        # No cache file yet (first ever run, or the cloud cache was evicted).
+        return {"name": name, "label": "never", "fetched": None, "expires": None}
+    return {
+        "name": name,
+        "label": cached_time_label(name),
+        "fetched": int(fetched_seconds * 1000),
+        "expires": int((fetched_seconds + max_age_seconds) * 1000),
+    }

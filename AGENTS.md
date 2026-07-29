@@ -6,7 +6,17 @@ Read this before writing or modifying any code.
 
 A personal dashboard for Eli. A Python script fetches things he checks regularly
 (weather, stocks, YouTube uploads, news) and writes a single static `dashboard.html`
-file to disk. He opens that file in a browser. No accounts, no server, no database in v1.
+file. Still no server and no database — but **as of 2026-07-26 it no longer runs on Eli's
+laptop.** GitHub Actions rebuilds it in the cloud on a schedule and publishes it to
+GitHub Pages:
+
+### 🔗 LIVE AT https://24emk24.github.io/dashboard/
+Repo: `https://github.com/24EMK24/dashboard` (public — free Pages requires it).
+
+The laptop is no longer involved in producing the page at all. **The old local
+`file:///…/dashboard.html` is frozen at the 2026-07-26 4:28 PM build and will never update
+again** — if Eli ever says the dashboard is stale, find out which of the two he is looking at
+*before* debugging anything else.
 
 Eli is early in learning to code. Two rules override normal AI defaults on this project:
 1. **Explainability over cleverness.** Prefer the simplest version that works, even if
@@ -34,7 +44,13 @@ or credentials without explicit instruction.
 ## Safety
 
 - **Credentials never committed.** `.env` and `codes` are already gitignored. Store any
-  secret there; document how to load it here.
+  secret there; document how to load it here. For the cloud build use GitHub repo secrets.
+- **The repo is PUBLIC** (free Pages requires it), so treat everything committed as
+  world-readable. `.gitignore` therefore also excludes **`.planning/`** (private session
+  notes) and **`.claude/`** (local tooling, contains hardcoded user paths) at Eli's request —
+  do not add them back. `config.json` (channels, news subjects) and `Docs/` **are** public by
+  Eli's explicit choice; he does not mind those. Private repos are not an option: Pages does
+  not publish from one on the free plan, and even paid the published page stays public.
 - **Fail soft, per panel.** Each panel fetches and renders its own chunk of HTML inside a
   try/except. One dead API shows a short "unavailable" message; it must never blank the
   whole page or stop the other panels from rendering.
@@ -45,17 +61,39 @@ or credentials without explicit instruction.
 
 - **v1 Weather: none needed.** Open-Meteo is keyless and accountless.
 - **v1 Stocks: none needed.** Source chosen is `yfinance`, which is keyless (scrapes Yahoo).
-  If it proves unreliable and we switch to Alpha Vantage / Finnhub, that source needs a key —
-  put it in a gitignored `.env`, load into the shell env, and verify free-tier limits first.
+- **If a keyed API is ever added** (e.g. Alpha Vantage / Finnhub if yfinance breaks): the key
+  goes in **GitHub repo secrets** (repo → Settings → Secrets and variables → Actions) and is
+  injected as an env var by `.github/workflows/build.yml`. A local gitignored `.env` is still
+  fine for running on the laptop, but **the cloud build cannot see `.env`** — it only has what
+  is committed plus what is in secrets. Verify free-tier limits before adopting one.
+- **Git identity is set repo-locally** to `24EMK24` /
+  `98726549+24EMK24@users.noreply.github.com` so Eli's real email never lands in the public
+  commit history. Do not change it to a personal address.
+- **Claude cannot `git push`** — this shell has prompts disabled
+  (`fatal: Cannot prompt because user interactivity has been disabled`). Git Credential
+  Manager is installed system-wide, so **ask Eli to run `git push` in his own terminal.**
 
 ## Running Things
 
 - Activate the virtual environment (PowerShell): `.\.venv\Scripts\Activate.ps1`
 - Install/refresh dependencies: `pip install -r requirements.txt`
 - Run a script: `python <script>.py` (e.g. `python weather_test.py`)
-- **Build the dashboard:** `python main.py` **from the project root** (the panels use
+- **Build the dashboard locally:** `python main.py` **from the project root** (the panels use
   relative paths like `config.json` and `cache/`). Writes `dashboard.html`. Direct call
-  without activating the venv: `.\.venv\Scripts\python.exe main.py`.
+  without activating the venv: `.\.venv\Scripts\python.exe main.py`. This is now only for
+  **testing a change before pushing** — it no longer produces the page Eli actually looks at.
+- **Publish a change (the real workflow now):** edit → commit → **`git push`** (Eli runs it).
+  The `push` trigger rebuilds and republishes within a couple of minutes. **Editing
+  `config.json` or a panel locally changes nothing anyone sees until it is pushed.**
+- **Force a rebuild without a code change:** repo → **Actions** tab → "Build dashboard" →
+  **Run workflow** (the `workflow_dispatch` trigger). Works from a phone. Tick
+  **`force_refresh`** to also ignore the 15-minute cache and re-fetch the feeds for real —
+  leave it unticked otherwise, since a plain rebuild inside that window republishes the same
+  data, and back-to-back re-fetches of 25 YouTube + 10 news feeds are what gets us throttled.
+  The freshness strip on the page shows when forcing is actually worth it.
+- **Check whether the cloud build is healthy:** the Actions tab shows every run. The public
+  API also works without auth, e.g.
+  `https://api.github.com/repos/24EMK24/dashboard/actions/runs?per_page=5`.
 - **Open `dashboard.html` in a real browser (Chrome/Edge), NOT VS Code's Simple Browser** —
   the Simple Browser has no DevTools console and doesn't persist `localStorage`, so
   delete/Watch-Later won't stick. `Start-Process dashboard.html` opens the OS default browser.
@@ -70,28 +108,99 @@ Split into a **`panels/` package** (done at panel three, 2026-07-22). Layout:
 - **`main.py`** — slim entry point. Imports each `build_<panel>_panel()`, builds the panel
   HTML, reads `template.html`, swaps its `__TOKENS__` for real values with `.replace()`
   (not `.format()` — the CSS/JS are full of `{ }`), and writes `dashboard.html`.
+- **`.github/workflows/build.yml`** — the cloud build (added 2026-07-26). Triggers:
+  `schedule` (**`3,13,23,33,43,53 * * * *`**), `workflow_dispatch` (manual button, with a
+  **`force_refresh`** checkbox), and `push` to `main`.
+  **Do not "simplify" that cron back to `*/30`.** Measured 2026-07-27: `*/30` produced **12
+  runs in 24.5 hours instead of 48** (all successful — GitHub *drops* scheduled runs on free
+  public repos under load, silently), with gaps up to **241 minutes**, so the page was
+  effectively rebuilding every ~2 hours. Six odd-minute slots dodge the `:00`/`:30` congestion
+  peak and give six chances to fire instead of two. It is not more load on YouTube — panels
+  only re-fetch when the 15-min cache is stale. **Do not raise it past 6/hour either:** GitHub
+  Pages has a soft limit of ~10 builds per hour.
+  The `force_refresh` input is passed to the build step as **`env: FORCE_REFRESH`** and read by
+  `force_refresh_requested()` in `panels/common.py`, which makes `get_cached()` ignore the
+  15-minute cache. Without it a manual run inside that window republishes identical data.
+  Steps: checkout → `setup-python` 3.12 (pip cached) → `pip install -r requirements.txt` →
+  **restore `cache/`** → `python main.py` → **save `cache/`** → copy `dashboard.html` to
+  `_site/index.html` → `upload-pages-artifact` → `deploy-pages`. `timeout-minutes: 20`,
+  `concurrency: pages`. **The `actions/cache` steps are not optional decoration:** every run
+  gets a brand-new empty runner, and the throttle carry-forward in `youtube.py`/`news.py`
+  works by reading the PREVIOUS `cache/*.json` — without restore/save that protection would
+  silently not exist. `cache/` stays gitignored (committing it would mean ~48 junk commits a
+  day). GitHub Pages **must** be configured with Source = "GitHub Actions", not
+  "Deploy from a branch". **A workflow with no `push:` trigger does not build on push** —
+  that mistake made the very first push publish nothing.
 - **`template.html`** — the page shell: all CSS and all browser JavaScript. Tokens it
   expects: `__LOCATION_NAME__`, `__LAT__`, `__LON__`, `__WEATHER_BODY__`, `__STOCKS__`,
-  `__YOUTUBE__`, `__NEWS__`. Edit this (not `dashboard.html`) to change styling or client
-  behaviour. It **self-reloads two ways** (2026-07-23) so an open tab picks up each rebuild:
+  `__YOUTUBE__`, `__NEWS__`, `__FRESHNESS__`, `__SCORES__`. Edit this (not `dashboard.html`) to change styling or client
+  behaviour. Its `<head>` carries a **`viewport` meta** (without it phones render a shrunken
+  ~980px desktop layout — required for the page to be usable on Eli's phone at all) and a
+  **`robots` noindex** (keeps the public page out of search engines; this is obscurity, NOT
+  privacy — the page is public and free-tier Pages cannot make it otherwise).
+  **`__LAT__`/`__LON__` are printed into the published page as JS constants** for the weather
+  Refresh button, so on a public page the coordinates are readable by anyone and cannot be
+  hidden by repo secrets or any other trick — **never store Eli's exact address**; use a
+  town/neighbourhood centre or lat/lon rounded to 2 decimals (~1 km). The quality cost is nil:
+  forecast models compute on multi-kilometre grids. It **self-reloads two ways** (2026-07-23) so an open tab picks up each rebuild:
   a 30-min `setTimeout`, PLUS a `visibilitychange` handler that reloads when the tab returns
   to view IF the page is ≥`RELOAD_MINUTES` old — the timer alone fails because browsers
   freeze it for backgrounded/asleep tabs, which is why a tab left open for hours showed
   stale "As of" stamps even though the disk build was current.
 - **`panels/common.py`** — shared helpers: `load_config()` and the constants it fills
   (`LOCATION_NAME`/`LATITUDE`/`LONGITUDE`/`TICKERS`/`YOUTUBE_CHANNELS`), plus the
-  cache-to-disk helpers `get_cached()` and `cached_time_label()`. Fail-soft to built-in
-  Seattle defaults if `config.json` is missing/invalid.
+  cache-to-disk helpers `get_cached()`, `cached_time_label()` and `cache_status()`. Fail-soft
+  to built-in Seattle defaults if `config.json` is missing/invalid.
+  **`CACHE_MAX_AGE = 900`** (15 min) is the single source of truth for cache lifetime — every
+  cached panel AND the freshness countdown use it, so use the constant, never a bare `900`,
+  or the countdown will eventually contradict the panels.
+  **`force_refresh_requested()`** reads the `FORCE_REFRESH` env var (set by the workflow's
+  `force_refresh` checkbox) and makes `get_cached()` skip its freshness shortcut. It
+  deliberately does **not** delete `cache/*.json` — the throttle carry-forward in
+  `youtube.py`/`news.py` reads the previous file, so the cache is overwritten in place.
+- **`panels/freshness.py`** — `build_freshness_strip()`, filling the **`__FRESHNESS__`** token
+  under the page title (added 2026-07-27). Shows when each cached source was last really
+  fetched, a **live JS countdown** to when a plain rebuild would fetch again, and a link to the
+  Actions page so Eli can start a rebuild from his phone. Python emits the times as epoch
+  **milliseconds** in a `data-sources` attribute; the ticking happens in `template.html`
+  (a time baked into a static file starts ageing the moment it is written). Must be built
+  **after** the panels in `main.py`, since it reports on the cache files they write.
+  **An in-page "rebuild now" button is not possible** — the page is static, and calling
+  GitHub's API needs a token that anyone could read out of the public page source.
+- **`panels/scores.py`** — `build_scores_panel()`, filling the **`__SCORES__`** token between
+  the freshness strip and the widget grid (added 2026-07-28 at Eli's request). One compact card
+  per team in `config.json`'s **`sports_teams`** (Mariners, Seahawks): a **live score** when a
+  game is in progress, otherwise the last final, plus the next scheduled game. Source is
+  **ESPN's public `site.api.espn.com` endpoint** — no key, no account, matching every other
+  source on this project — at
+  `/apis/site/v2/sports/<sport>/<league>/teams/<team>/schedule`. One request per team returns
+  the whole season, so finals and fixtures come from a single fetch (~0.5 s for both teams;
+  the MLB payload is ~2.4 MB, which is why only the parsed handful of facts is cached, never
+  the raw response). **It is an undocumented API** — the one ESPN's own site calls — so expect
+  it to break someday; the fail-soft wrapper and the per-team `try` handle that, and one
+  team failing still renders the other.
+  **`SCORES_MAX_AGE = 300` (5 min) deliberately differs from `CACHE_MAX_AGE`** — a 15-minute-old
+  score is several innings behind, and the 15-minute rule exists to avoid YouTube/Google
+  throttling, which does not apply to two small ESPN requests.
+  **Scores are deliberately NOT in `panels/freshness.py`'s `SOURCES`:** that countdown reports
+  the soonest-expiring cache, so a 5-minute source would peg it to "Ready" permanently and
+  destroy its signal about YouTube and news. The card carries its own "As of" stamp instead.
+  Read the ESPN `status.type.state` field as `pre` / `in` / `post`. The record is shown **only
+  once the season has games played** (`show_record`) — out of season ESPN still reports LAST
+  season's record, and the Seahawks reading "14-3" beside a September fixture looks like this
+  year's result. Game start times are cached as epoch **seconds** and turned into
+  "Today 7:10 PM" / "Tomorrow" at RENDER time, so a cached label cannot be left saying "Today"
+  after midnight.
 - **`panels/weather.py`** — `build_weather_panel()` (Open-Meteo, Pacific). Its `weather_label`
   / `to_ampm` are MIRRORED by JS in `template.html`; keep the two in sync.
 - **`panels/stocks.py`** — `build_stocks_panel()` (yfinance, cached, sparklines).
 - **`panels/youtube.py`** — `build_youtube_panel()` (**25** channel RSS feeds, today-only in
-  Pacific, cached via `get_cached("youtube", …)`). **Live/rerun filter (2026-07-24):** Eli
-  doesn't want live streams/reruns/VODs, and YouTube's RSS feed has NO live flag (verified —
-  the XML lacks `isLive`/`liveBroadcast`/`premiere`), so `is_live_or_rerun(title)` filters on
-  title keywords only (`LIVE_MARKERS`), applied at render time next to the today-filter.
-  Conservative to avoid false positives (won't catch a rerun titled like a normal video —
-  that needs the Data API). Edit `LIVE_MARKERS` to tune. Feeds are fetched by `fetch_one_feed()`
+  Pacific, cached via `get_cached("youtube", …)`). **The live/rerun filter was REMOVED
+  2026-07-27** at Eli's request — nothing is hidden by title any more. Do not re-add it without
+  him asking: measured on a real 375-video cache it hid **1** video, and when he reported
+  missing videos the actual cause was the ~2-hour rebuild gap (see the workflow note above),
+  not the filter. YouTube's RSS carries no live flag at all, so any such filter can only guess
+  from the title. Feeds are fetched by `fetch_one_feed()`
   using **`requests` + a browser User-Agent + retry/backoff + a gap between channels**
   (`CHANNEL_GAP_SECONDS = 2.5`), then parsed with `feedparser` — NOT feedparser's own
   downloader, which YouTube throttles (it silently dropped ~15 of 23 feeds). Reuse this
@@ -142,41 +251,54 @@ message on failure (fail-soft), so one dead source never blanks the page.
 Personal choices live in **`config.json`** (design §6): `location`, `tickers`,
 `youtube_channels` (each `{name, channel_id}`, IDs are the `UC…` form from each channel's
 RSS feed), and `news_subjects` (each `{name, query}` — the `query` is what we search Google
-News for; an **empty query means the general top-stories feed**).
+News for; an **empty query means the general top-stories feed**), and **`sports_teams`**
+(each `{name, sport, league, team}` — the last three are the words ESPN's address needs, e.g.
+`baseball`/`mlb`/`sea`; `name` is just the label shown on the card).
 
 `weather_test.py` is a throwaway learning script (prints temps to the terminal), not part of
 the real pipeline — safe to delete anytime.
 
-**Keeping the dashboard fresh (auto-updater, added 2026-07-23 — LAPTOP-ONLY stopgap):**
-`main.py` must re-run to refresh stocks/YouTube/news. Three helpers exist (all optional):
-- `run_forever.ps1` — double-click keep-alive loop; re-runs `main.py` every 30 min while
-  its window stays open.
-- `register-updater.ps1` / `unregister-updater.ps1` — install/remove a **Windows Scheduled
-  Task** `EliDashboardUpdate` that runs `pythonw.exe main.py` every 30 min at logon, no
-  window, no admin/password. **Currently installed on Eli's laptop.**
-These are stopgaps to be **retired once v2 cloud hosting (GitHub Actions + Pages) is live**;
-the cloud will do the scheduled rebuild instead. Auto-refresh was originally a deferred v3
-item — added early with Eli's approval.
+**Keeping the dashboard fresh — THE CLOUD DOES THIS NOW (since 2026-07-26).**
+`.github/workflows/build.yml` re-runs `main.py` on GitHub's machines and republishes the page.
+Nothing on Eli's laptop is involved. **The schedule asks for six rebuilds an hour but you must
+not assume you get them:** GitHub drops scheduled runs on free public repos whenever it is busy,
+silently, and measured on 2026-07-27 it was delivering only about one rebuild every two hours.
+Treat the cadence as best-effort, and diagnose it by the gaps between runs (see below).
 
-**THE BIG LIMITATION OF THE LOCAL UPDATER (proven 2026-07-25):** `EliDashboardUpdate` runs
-only while the laptop is **awake and logged on**. While it sleeps, the task fires **zero
-times**, and sleep also **kills a build already in progress** (`LastTaskResult 267014` =
-`SCHED_S_TASK_TERMINATED`). A 28-hour sleep (7/24 5:20 PM → 7/25 9:48 PM) left Eli looking at
-a day-old page — the reported symptom was "YouTube didn't update", which looks exactly like
-the throttling of sessions 3–4 but is a completely different cause.
+**The old laptop stopgaps are RETIRED.** The Windows Scheduled Task `EliDashboardUpdate` was
+removed on 2026-07-26 (`unregister-updater.ps1`, verified gone). `register-updater.ps1`,
+`unregister-updater.ps1` and `run_forever.ps1` still exist in the repo as history and as an
+emergency fallback — **do not re-install the task** without a specific reason; it would
+duplicate the cloud build, overwrite the local `dashboard.html`, and re-add load on Eli's home
+IP (a known throttle driver).
 
-**How to diagnose a stale page — check these in order, do NOT assume throttling:**
-1. `Get-Item dashboard.html | Select LastWriteTime` — is the build on disk actually old? If
-   it is current, the problem is browser-side (see `template.html`'s reload handlers).
-2. Kernel-Power **event 42** (entering sleep) and Power-Troubleshooter **event 1** (wake) in
-   the System log — was the machine even awake to run the task?
-3. Only then look at feed coverage / throttling.
+**WHY THE LAPTOP UPDATER HAD TO GO (proven 2026-07-25):** it ran only while the laptop was
+**awake and logged on**. While asleep the task fired **zero times**, and sleep also **killed
+builds in progress** (`LastTaskResult 267014` = `SCHED_S_TASK_TERMINATED`). A 28-hour sleep
+(7/24 5:20 PM → 7/25 9:48 PM) left Eli looking at a day-old page. Also: `NumberOfMissedRuns = 0`
+is **NOT** proof of health — Windows does not count runs it never fired while asleep (session 4
+misread it as a clean bill of health). This whole class of failure is now structurally
+impossible; kept here so the symptom is recognised if it ever resurfaces in another form.
 
-**`NumberOfMissedRuns = 0` is NOT proof the task is healthy** — Windows does not count runs
-it never fired while asleep. Session 4 read that counter as a clean bill of health; it isn't
-one. A clean unthrottled 25-channel build takes **~108 seconds** (measured 2026-07-25); the
-multi-minute runs seen in sessions 3–5 were wall clock inflated by throttling back-offs or a
-sleep suspension, not normal cost. There is still a short stale window right after waking.
+**How to diagnose a stale page — check these in order:**
+1. **Which page is he looking at?** The old `file:///…/dashboard.html` is **frozen forever** at
+   the 2026-07-26 4:28 PM build. It is not a bug; he should be using
+   `https://24emk24.github.io/dashboard/`. Rule this out first — it is now the most likely cause.
+2. **Did the cloud build run and pass?** Actions tab, or
+   `https://api.github.com/repos/24EMK24/dashboard/actions/runs?per_page=60` (no auth needed).
+   **Check the GAPS between runs, not just their conclusions** — the 2026-07-27 problem was 12
+   consecutive *successful* runs spread over 24.5 hours, because GitHub silently drops
+   scheduled runs on free public repos under load. Nothing looks broken when this happens; the
+   page is simply old. Also: **scheduled workflows auto-disable after 60 days of repo
+   inactivity** (any commit resets it).
+3. **Is it browser-side?** `template.html` self-reloads on a 30-min timer plus a
+   `visibilitychange` handler, because browsers freeze timers in backgrounded tabs.
+4. **Only then** look at feed coverage / throttling.
+
+A clean unthrottled 25-channel build takes **~108 seconds** locally (measured 2026-07-25) and
+run #1 in the cloud took **~2 minutes** end to end including `pip install`. Multi-minute runs
+seen in sessions 3–5 were wall clock inflated by throttling back-offs or a sleep suspension,
+not normal cost.
 
 ## Key Commands / Endpoints
 
@@ -189,7 +311,9 @@ TBD — will be filled in as commands, routes, or user-facing operations are imp
   step if it can be avoided; define new terms the first time they appear in real code.
 - **Cache-to-disk** pattern (live since Panel 2): `get_cached(name, fetch_fn, max_age)` in
   `panels/common.py` saves a fetch to `cache/<name>.json` and reuses it while fresh. Stocks
-  and YouTube both fetch through it (~15 min). Use it for every new fetching panel.
+  and YouTube both fetch through it. **Pass `CACHE_MAX_AGE`, never a bare `900`** — the
+  freshness strip promises that same number to Eli on the page. `FORCE_REFRESH=1` in the
+  environment bypasses it for one run. Use this helper for every new fetching panel.
 - **Persistent browser state via `localStorage`** (since Panel 3): anything the user changes
   in the browser between runs (YouTube deletions, the Watch-Later list) is stored in
   `localStorage` in `template.html`'s JS, because a static file has no server. State is
@@ -200,8 +324,8 @@ TBD — will be filled in as commands, routes, or user-facing operations are imp
 | Milestone | What it adds |
 | --- | --- |
 | **v1** | Weather + stocks + YouTube + news panels, generated as a local `dashboard.html` opened on the laptop. **COMPLETE as of 2026-07-23.** |
-| **v2** | Reachable from Eli's phone — the script runs on a free host on a schedule and produces a page his phone can load. A separable deployment step; do it only after v1 works. **NEXT UP: GitHub Actions (cron rebuild) + GitHub Pages (public URL). Gated on Eli making a free GitHub account; page is public on the free tier.** |
-| **v3** | Price-drop alerts, and/or auto-refresh and notifications. The genuinely hard, optional tier. |
+| **v2** | Reachable from Eli's phone, not dependent on Windows. **COMPLETE as of 2026-07-26** — GitHub Actions rebuilds on a schedule and publishes to GitHub Pages at **https://24emk24.github.io/dashboard/**. First cloud build passed on the first attempt; phone confirmed by Eli; laptop updater retired the same day. Refresh cadence was found to be far worse than the cron claimed and was reworked on 2026-07-27 (see the workflow notes above). |
+| **v3** | Price-drop alerts, notifications, and/or true cross-device state sync. The genuinely hard, optional tier. **Not started — do not begin any of it unprompted.** Note that `localStorage` (deletions, Watch Later) is per-browser AND per-origin, so laptop and phone each keep their own; real sync needs a backend, which the project has deliberately avoided so far. |
 
 ## Session Protocol
 

@@ -28,6 +28,10 @@
     { "name": "Reckless Ben",        "channel_id": "UC_UE7maDDe8OqqC8-TtXaKg" },
     { "name": "PointlessHub",        "channel_id": "UCKNbAYjhxVS5Y8p3FhhUxoA" }
   ],
+  "sports_teams": [
+    { "name": "Mariners", "sport": "baseball", "league": "mlb", "team": "sea" },
+    { "name": "Seahawks", "sport": "football", "league": "nfl", "team": "sea" }
+  ],
   "news_subjects": [
     { "name": "Top news",      "query": "" },
     { "name": "Seattle",       "query": "Seattle" },

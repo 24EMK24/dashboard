@@ -43,7 +43,9 @@ from zoneinfo import ZoneInfo
 # Eli's subject list from config.json, plus the shared cache helpers. CACHE_DIR is the
 # folder get_cached writes to; we read cache/news.json from it to carry subjects over
 # when Google throttles a fetch.
-from panels.common import NEWS_SUBJECTS, get_cached, cached_time_label, CACHE_DIR
+from panels.common import (
+    NEWS_SUBJECTS, get_cached, cached_time_label, CACHE_DIR, CACHE_MAX_AGE,
+)
 
 # A normal browser User-Agent, so Google News serves the feed instead of throttling us.
 USER_AGENT = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
@@ -275,7 +277,7 @@ def is_today(epoch):
 def build_news_panel():
     try:
         # Every subject's items, THROUGH THE CACHE (re-fetched at most every ~15 minutes).
-        subjects = get_cached("news", fetch_news_data, 900)
+        subjects = get_cached("news", fetch_news_data, CACHE_MAX_AGE)
 
         pieces = []
         pieces.append("<h2>News</h2>")

@@ -7,7 +7,7 @@
 # "yfinance" fetches stock prices from Yahoo Finance. No API key or account needed.
 import yfinance as yf
 # Shared bits: the tickers from config.json, and the cache helpers.
-from panels.common import TICKERS, get_cached, cached_time_label
+from panels.common import TICKERS, get_cached, cached_time_label, CACHE_MAX_AGE
 
 # ---------------------------------------------------------------------------
 # Small stock helpers (shared by the panel below)
@@ -93,7 +93,7 @@ def build_stocks_panel():
     try:
         # Get the stock numbers THROUGH THE CACHE: if we fetched less than 15 minutes
         # (900 seconds) ago, reuse the saved copy instead of hitting Yahoo again.
-        stocks = get_cached("stocks", fetch_stocks_data, 900)
+        stocks = get_cached("stocks", fetch_stocks_data, CACHE_MAX_AGE)
 
         pieces = []
         pieces.append("<h2>Stocks</h2>")

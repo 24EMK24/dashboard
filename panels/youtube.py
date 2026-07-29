@@ -34,7 +34,9 @@ from zoneinfo import ZoneInfo
 
 # Eli's channel list from config.json, plus the shared cache helpers. CACHE_DIR is the
 # folder get_cached writes to; we read cache/youtube.json from it to carry channels over.
-from panels.common import YOUTUBE_CHANNELS, get_cached, cached_time_label, CACHE_DIR
+from panels.common import (
+    YOUTUBE_CHANNELS, get_cached, cached_time_label, CACHE_DIR, CACHE_MAX_AGE,
+)
 
 # YouTube publishes one RSS feed per channel at this address; we fill in the channel id.
 FEED_URL = "https://www.youtube.com/feeds/videos.xml?channel_id="
@@ -53,37 +55,14 @@ CHANNEL_GAP_SECONDS = 2.5
 # longer cool-off, since throttling is usually brief. This recovers most stragglers.
 RETRY_PASS_PAUSE = 10
 
-# Eli doesn't want live streams / stream reruns / VODs in the feed. IMPORTANT: YouTube's RSS
-# feed does NOT say whether a video is a live stream — verified on a stream-heavy channel,
-# the XML has no "isLive"/"liveBroadcast"/"premiere" field at all. So the ONLY thing we can
-# check is the TITLE. If a title contains any of these phrases (case-insensitive) we hide the
-# video. Phrases are kept distinctive on purpose so we don't wrongly hide a normal upload:
-# a bare "live" or "stream" would catch too much ("mainstream", "lives on the edge"), so we
-# match longer, clearly-streamy phrases instead. Edit this list to taste. The trade-off: a
-# stream rerun titled like a normal video (no streamy words) can't be detected and will slip
-# through — there's no feed data to catch that without the YouTube Data API (a key + quota).
-LIVE_MARKERS = [
-    "\U0001F534",       # 🔴 red circle — the near-universal "live" emoji in titles
-    "live stream",
-    "livestream",
-    "live now",
-    "streaming now",
-    "[live]",
-    "(live)",
-    " live!",           # e.g. "Playing Elden Ring LIVE!" (space avoids "olive!"/"alive!")
-    "full stream",
-    "stream vod",
-    "vod",
-    "rerun",
-    "re-run",
-]
-
-
-def is_live_or_rerun(title):
-    # True if the title looks like a live stream, a stream rerun, or a VOD — based only on
-    # the words in the title (see LIVE_MARKERS above for why that's all we have to go on).
-    low = title.lower()
-    return any(marker in low for marker in LIVE_MARKERS)
+# NOTE (2026-07-27): there used to be a live-stream / rerun / VOD filter here — a list of
+# streamy title phrases (LIVE_MARKERS) plus an is_live_or_rerun() check applied below. It was
+# REMOVED at Eli's request: he doesn't want videos hidden. It could only ever guess from the
+# title anyway, because YouTube's RSS feed carries no live flag at all (verified on a
+# stream-heavy channel — the XML has no "isLive"/"liveBroadcast"/"premiere" field), and on a
+# real cache it was hiding 1 video out of 375. If a title-based filter is ever wanted again,
+# see this file's history; catching a rerun titled like a normal upload would need the
+# YouTube Data API (a key + quota).
 
 
 def fetch_one_feed(channel_id):
@@ -199,18 +178,13 @@ def fetch_youtube_data():
 def build_youtube_panel():
     try:
         # All recent videos, THROUGH THE CACHE (re-fetched at most every ~15 minutes).
-        videos = get_cached("youtube", fetch_youtube_data, 900)
+        videos = get_cached("youtube", fetch_youtube_data, CACHE_MAX_AGE)
 
         # Today's date in Pacific, as "2026-07-22". A video counts as "today" if its
         # own published time, converted to Pacific, falls on this same date.
         today = datetime.now(PACIFIC).strftime("%Y-%m-%d")
         todays = []
         for v in videos:
-            # Skip anything that looks like a live stream / rerun / VOD (title-based, since
-            # the feed carries no live flag — see LIVE_MARKERS). Checked here at render time
-            # so it also hides such videos already sitting in the cache, no re-fetch needed.
-            if is_live_or_rerun(v["title"]):
-                continue
             when = datetime.fromtimestamp(v["published_epoch"], PACIFIC)
             if when.strftime("%Y-%m-%d") == today:
                 todays.append(v)
