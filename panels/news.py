@@ -319,9 +319,16 @@ def build_news_panel():
             # delete every story in a group.
             pieces.append('<div class="news-subject">')
             # Subject heading (always shown, so you can see the subject is being watched
-            # even on a quiet day).
-            pieces.append('<div class="news-subject-title">'
-                          + html.escape(subject["name"]) + '</div>')
+            # even on a quiet day). When there ARE stories to clear it also carries a ✕,
+            # which dismisses every headline showing under this subject in one press —
+            # see clearNewsSubject() in template.html. No point offering it on a subject
+            # that has nothing under it, so it is only added when there is something.
+            heading = '<div class="news-subject-title">' + html.escape(subject["name"])
+            if ranked:
+                heading += ('<button class="news-clear" onclick="clearNewsSubject(this)"'
+                            ' title="Clear these headlines">&#10005;</button>')
+            heading += '</div>'
+            pieces.append(heading)
 
             if not ranked:
                 pieces.append('<p class="news-empty">Nothing today.</p>')

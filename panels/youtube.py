@@ -229,11 +229,17 @@ def build_youtube_panel():
                     ' data-channel="' + channel + '">'
                 )
                 # Thumbnail + title both link to the video, opening in a new tab.
-                pieces.append('<a class="yt-thumb-link" href="' + url + '" target="_blank" rel="noopener">')
+                # onclick="clearOnOpen(this)" ALSO takes the card off the list once you
+                # open it — once a video has been watched it doesn't need to sit in the
+                # list any more. It does not interfere with the link itself; the video
+                # opens exactly as before. See clearOnOpen() in template.html.
+                pieces.append('<a class="yt-thumb-link" href="' + url + '" target="_blank" rel="noopener"'
+                              ' onclick="clearOnOpen(this)">')
                 pieces.append('<img class="yt-thumb" src="' + thumb + '" alt="" loading="lazy">')
                 pieces.append('</a>')
                 pieces.append('<div class="yt-meta">')
-                pieces.append('<a class="yt-title" href="' + url + '" target="_blank" rel="noopener">' + title + '</a>')
+                pieces.append('<a class="yt-title" href="' + url + '" target="_blank" rel="noopener"'
+                              ' onclick="clearOnOpen(this)">' + title + '</a>')
                 pieces.append('<div class="yt-channel">' + channel + '</div>')
                 pieces.append('<div class="yt-actions">')
                 # Save this card to Watch Later. onclick passes the card element (this)

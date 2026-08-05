@@ -125,10 +125,22 @@
   /* each subject (e.g. "Seahawks") is a group: its heading plus today's stories */
   .news-subject { display: flex; flex-direction: column; gap: 0.5rem; }
   /* a subject heading — a small labelled divider before its stories */
+  /* display:flex lines the heading up with its ✕ and lets margin-left:auto on the button
+     push it to the far right of the row. */
   .news-subject-title {
     font-size: 0.78rem; font-weight: 700; color: #33495e;
     border-left: 2px solid rgba(43, 125, 224, 0.3); padding-left: 0.5rem;
+    display: flex; align-items: center; gap: 0.4rem;
   }
+  /* the ✕ next to a subject heading: clears every headline showing under that subject at
+     once. Styled like the per-story ✕ below, a touch smaller, so the two read as the same
+     action at two different sizes. */
+  .news-clear {
+    margin-left: auto; border: none; background: rgba(0, 0, 0, 0.08); color: #33495e;
+    cursor: pointer; font-size: 0.68rem; line-height: 1; padding: 0.15rem 0.4rem;
+    border-radius: 999px;
+  }
+  .news-clear:hover { background: #d64545; color: #fff; }
   .news-story {
     background: rgba(255, 255, 255, 0.7); border-radius: 12px; padding: 0.5rem 0.7rem;
     display: flex; flex-direction: column; gap: 0.25rem;
@@ -456,9 +468,11 @@ function setDismissedToday(ids) {
   localStorage.setItem(DISMISS_KEY, JSON.stringify(obj));
 }
 
-// Dismiss one of today's videos: hide its card and remember it for the rest of today.
-function dismissToday(btn) {
-  const card = btn.closest(".yt-card");   // the card this ✕ belongs to
+// Dismiss one of today's videos, given the CARD itself: hide it and remember it for the
+// rest of today. Split out from dismissToday below so the "clear it when you click it"
+// handler can reuse it — that one starts from a link, not from the ✕ button.
+function dismissTodayCard(card) {
+  if (!card) return;
   const vid = card.dataset.vid;           // its video id (from the data-vid attribute)
   const ids = getDismissedToday();
   if (!ids.includes(vid)) {
@@ -467,6 +481,36 @@ function dismissToday(btn) {
   }
   card.remove();          // take it off the page now
   updateTodayEmpty();     // maybe show the "all caught up" note
+}
+
+// The ✕ button's version: work out which card it belongs to, then do the same thing.
+function dismissToday(btn) {
+  dismissTodayCard(btn.closest(".yt-card"));
+}
+
+// Clicking a video's thumbnail or title opens it AND takes it off the list — Eli asked for
+// a video to clear once he's clicked it, in both lists.
+//
+// This does NOT call preventDefault, so the link still opens in a new tab exactly as
+// before; we only tidy up behind it. The tidying is wrapped in a 0-millisecond setTimeout
+// so it happens just AFTER the browser has finished handling the click: pulling a link out
+// of the page while its own click is still being processed can cancel the new tab in some
+// browsers. A 0ms wait is long enough to be safe and far too short to see.
+function clearOnOpen(el) {
+  const card = el.closest(".yt-card");
+  if (!card) return;
+  const vid = card.dataset.vid;
+  // Which of the two lists is this card in? They forget things differently: a "New Today"
+  // dismissal lasts for the rest of today, while Watch Later is a list built on purpose,
+  // so opening something there removes it for good.
+  const inWatchLater = !!card.closest("#watch-later-list");
+  setTimeout(function () {
+    if (inWatchLater) {
+      removeFromLater(vid);
+    } else {
+      dismissTodayCard(card);
+    }
+  }, 0);
 }
 
 // Save one of today's videos to Watch Later. The button passes itself in as `btn`, so
@@ -517,10 +561,15 @@ function renderWatchLater() {
   for (const v of items) {
     const card = document.createElement("div");
     card.className = "yt-card";
+    // Carry the video id on the card, the same way the Python-built "New Today" cards do.
+    // clearOnOpen reads it to know which video to remove when the card is clicked.
+    card.dataset.vid = v.video_id;
 
     const thumbLink = document.createElement("a");
     thumbLink.className = "yt-thumb-link";
     thumbLink.href = v.url; thumbLink.target = "_blank"; thumbLink.rel = "noopener";
+    // Clicking a saved video opens it and drops it from the list (see clearOnOpen).
+    thumbLink.onclick = function () { clearOnOpen(this); };
     const img = document.createElement("img");
     img.className = "yt-thumb"; img.src = v.thumbnail; img.alt = ""; img.loading = "lazy";
     thumbLink.appendChild(img);
@@ -530,6 +579,7 @@ function renderWatchLater() {
     const title = document.createElement("a");
     title.className = "yt-title";
     title.href = v.url; title.target = "_blank"; title.rel = "noopener";
+    title.onclick = function () { clearOnOpen(this); };
     title.textContent = v.title;
     const chan = document.createElement("div");
     chan.className = "yt-channel";
@@ -618,7 +668,28 @@ function dismissNews(btn) {
   updateNewsSubjectEmpty(group);  // maybe show "Nothing today." for this subject
 }
 
-// If a subject group has no stories left, show a short "Nothing today." note (once).
+// Clear EVERY headline showing under one subject, in one press.
+//
+// This is deliberately just the per-story ✕ done to all of them at once: each story's id
+// goes into the same today-only dismissed list. That matters, because it is what makes the
+// subject keep working afterwards — a story is remembered by its LINK, so the headlines on
+// screen now stay gone, while any NEW story that turns up in a later rebuild has a
+// different link and comes through normally. The subject heading stays put either way.
+function clearNewsSubject(btn) {
+  const group = btn.closest(".news-subject");
+  if (!group) return;
+  const ids = getDismissedNewsToday();
+  for (const story of group.querySelectorAll(".news-story")) {
+    const id = story.dataset.newsid;
+    if (!ids.includes(id)) ids.push(id);
+    story.remove();
+  }
+  setDismissedNewsToday(ids);      // save once, after removing them all
+  updateNewsSubjectEmpty(group);   // show "Nothing today." in the space they left
+}
+
+// If a subject group has no stories left, show a short "Nothing today." note (once) and
+// hide its ✕, since at that point there is nothing left for it to clear.
 function updateNewsSubjectEmpty(group) {
   if (!group) return;
   const hasStory = group.querySelector(".news-story");
@@ -629,6 +700,8 @@ function updateNewsSubjectEmpty(group) {
     note.textContent = "Nothing today.";
     group.appendChild(note);
   }
+  const clearBtn = group.querySelector(".news-clear");
+  if (clearBtn) clearBtn.style.display = hasStory ? "" : "none";
 }
 
 // On page load, hide any of today's stories already dismissed today, then tidy up any

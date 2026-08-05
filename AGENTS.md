@@ -99,6 +99,14 @@ or credentials without explicit instruction.
   delete/Watch-Later won't stick. `Start-Process dashboard.html` opens the OS default browser.
   Eli can bookmark the `file://` address; stocks + New Today only refresh on a `python main.py`
   re-run, weather refreshes live via its button, and localStorage state persists per-browser.
+- **Testing the page's JavaScript: Node IS available (v24.18.0 as of 2026-08-04).** Older
+  notes claiming there is no Node on this machine are wrong. `node --check` on the extracted
+  `<script>` catches a syntax error that would otherwise silently break every interactive
+  feature at once (the freshness countdown sitting on "checking…" is the usual symptom), and
+  **`jsdom` gives a real DOM plus a real `localStorage`**, so the ✕ buttons, the click-to-clear
+  and the per-day clean-slate rules can be exercised against the actual generated
+  `dashboard.html`. **Install jsdom in a scratch folder, NOT into this project** — nothing in
+  the build needs it and `requirements.txt` is Python-only.
 - `seed-watchlater.js` (project root, if present) is a THROWAWAY console helper for testing
   Watch Later when the New-Today feed is empty — not part of the build; safe to delete.
 
@@ -118,6 +126,17 @@ Split into a **`panels/` package** (done at panel three, 2026-07-22). Layout:
   peak and give six chances to fire instead of two. It is not more load on YouTube — panels
   only re-fetch when the 15-min cache is stale. **Do not raise it past 6/hour either:** GitHub
   Pages has a soft limit of ~10 builds per hour.
+  **BUT THE SIX-SLOT CRON DID NOT FIX THE CADENCE — measured over 7 days, 2026-08-04.**
+  95 scheduled runs delivered out of **984 requested (10%)**, all successful, gaps **min 48 ·
+  median 93 · mean 105 · max 218 minutes**. Against the old `*/30` baseline (median 99) that
+  is noise, not a fix. **Asking GitHub for more scheduled runs does not get more** — the
+  congestion-dodging theory is disproven, so do not spend another session re-tuning this
+  expression. Leaving it at six slots is still correct (it is no worse, and costs nothing on a
+  public repo), and **`*/30` is still not an improvement to revert to**. The only real
+  escalation left is an **external cron service (e.g. cron-job.org) hitting a
+  `repository_dispatch` webhook** — more reliable, but it costs an account, a token and
+  another failure point, so **discuss it with Eli before building it.** Treat the effective
+  rebuild cadence as ~1.5 hours when reasoning about anything else on this project.
   The `force_refresh` input is passed to the build step as **`env: FORCE_REFRESH`** and read by
   `force_refresh_requested()` in `panels/common.py`, which makes `get_cached()` ignore the
   15-minute cache. Without it a manual run inside that window republishes identical data.
@@ -179,6 +198,31 @@ Split into a **`panels/` package** (done at panel three, 2026-07-22). Layout:
   the raw response). **It is an undocumented API** — the one ESPN's own site calls — so expect
   it to break someday; the fail-soft wrapper and the per-team `try` handle that, and one
   team failing still renders the other.
+  **NEVER PUT `Chrome/<version>` IN THIS PANEL'S User-Agent (learned the hard way,
+  2026-08-04).** ESPN's front door answers **403 "Access Denied"** to any request whose
+  User-Agent claims to be Chrome. This had killed the panel outright — both cards on the live
+  page read "Scores unavailable right now." Narrowed down by building the string up one piece
+  at a time: 200 all the way through `…AppleWebKit/537.36 (KHTML, like Gecko)`, then **403 the
+  moment `Chrome/122.0` was appended**. Plain `python-requests` and no User-Agent at all both
+  get 200. Use the short `"Mozilla/5.0 (Windows NT 10.0; Win64; x64)"` form that
+  `youtube.py` and `news.py` use — all three panels now match. **General lesson: fail-soft
+  hides outages as well as surviving them.** Nothing announced that scores had been dead on
+  the live page; check the real page, not just the code, when judging whether a panel works.
+  **LIVE SCORES COME FROM A DIFFERENT ENDPOINT (`fetch_live_score()`, added 2026-08-04).**
+  The `/schedule` address above carries **no score at all while a game is being played** —
+  verified against four teams mid-game, whose competitor records have no `score` key until
+  the game finishes. Only the `status` is there, which is why the card showed a LIVE badge
+  and "Top 4th" but no numbers. The live numbers live at
+  `/apis/site/v2/sports/<sport>/<league>/scoreboard`, which lists today's games league-wide;
+  `fetch_live_score()` is called **only when the schedule reports a game in progress**, so an
+  ordinary day still costs one request per team, and it has its own try/except so a
+  scoreboard outage costs the numbers rather than the card.
+  **`score_of()` must handle TWO score shapes** because ESPN is inconsistent between its own
+  endpoints: `/schedule` gives `{"value": 4.0, "displayValue": "4"}` on a finished game,
+  `/scoreboard` gives the plain string `"4"` on a live one.
+  **Do not "verify" the live path with a synthetic fixture again** — session 9 did exactly
+  that, built it with the finished-game shape, and shipped a bug Eli then found. Point the
+  code at a team that is genuinely playing (any league, `/scoreboard` lists them) instead.
   **CONFIRMED 2026-07-28: ESPN does not throttle GitHub's runner IP** — cloud run #25 fetched
   both teams from an empty cache and rendered correctly. That was a genuine risk worth
   retesting if scores ever go blank in the cloud but work locally, since YouTube and Google
@@ -224,7 +268,17 @@ Split into a **`panels/` package** (done at panel three, 2026-07-22). Layout:
   Renders "New Today" cards with `data-*` attributes; the ✕ delete, the daily clean-slate
   reset, and the whole "Watch Later" widget are handled by JS + `localStorage` in
   `template.html` (a static file has no server to persist those choices). Titles are
-  HTML-escaped before insertion. Channel IDs (`UC…`) are resolved via each channel's
+  HTML-escaped before insertion.
+  **Clicking a video clears it from the list (`clearOnOpen()`, added 2026-08-04 at Eli's
+  request), in BOTH lists** — the thumbnail and title links carry
+  `onclick="clearOnOpen(this)"`. The two lists forget differently on purpose: a "New Today"
+  click dismisses for the rest of today, a "Watch Later" click removes permanently, because
+  that list is one Eli built deliberately. **The removal inside `clearOnOpen` is wrapped in a
+  0 ms `setTimeout` and that is load-bearing** — taking a link out of the page while its own
+  click is still being handled can cancel the new tab in some browsers, and "the video didn't
+  open" would be far worse than a card that lingers a moment. It also must never call
+  `preventDefault()`. `dismissToday()` was split so `dismissTodayCard(card)` can be called
+  from a link rather than a button. Channel IDs (`UC…`) are resolved via each channel's
   `<link rel="canonical">` — the plain `"channelId"` in page HTML grabs *featured* channels.
 - **`panels/news.py`** — `build_news_panel()`. **Google News per-subject corroboration**
   panel (reframed from design §4's plain RSS+keyword idea, since Eli uses Google News). One
@@ -245,7 +299,16 @@ Split into a **`panels/` package** (done at panel three, 2026-07-22). Layout:
   blob — and shows each story with a **✓ N sources** badge (distinct outlets),
   most-corroborated first. Each story has a ✕ delete handled by JS + `localStorage`
   (`news_dismissed_v1`, date-keyed, clean slate each day) in `template.html`, mirroring the
-  YouTube deletions. Honest limits (stated to Eli + on the widget): corroboration ≠ truth,
+  YouTube deletions.
+  **Each subject heading also carries a ✕ that clears every headline under it at once**
+  (`clearNewsSubject()`, added 2026-08-04 at Eli's request). It **clears the headlines, it
+  does NOT hide the category** — Eli's words were *"i just want the old headlines that were
+  deleted gone and if there are new ones they can come in."* It works by pushing every
+  visible story's id into the **same** `news_dismissed_v1` list, so it needed no new storage
+  and no "unhide" affordance: because a story is remembered by its **link**, cleared
+  headlines stay gone while new ones from a later rebuild come straight through. The heading
+  always stays; the ✕ is only rendered when the subject has stories and hides itself once its
+  group is empty. Honest limits (stated to Eli + on the widget): corroboration ≠ truth,
   and crude matching can over/under-merge. Low-volume subjects (Half-Life 3, Sly Cooper 5)
   usually show "Nothing today" — an accepted trade-off of strict today-only.
 
