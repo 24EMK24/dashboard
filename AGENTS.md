@@ -416,6 +416,11 @@ impossible; kept here so the symptom is recognised if it ever resurfaces in anot
    `https://24emk24.github.io/dashboard/`. Rule this out first — it is now the most likely cause.
 2. **Did the cloud build run and pass?** Actions tab, or
    `https://api.github.com/repos/24EMK24/dashboard/actions/runs?per_page=60` (no auth needed).
+   **Runs, jobs and PER-STEP TIMINGS are all public** — `/actions/runs/<run_id>/jobs` gives a
+   step-by-step breakdown, which is how the "87 seconds of sleeping" was found. **Run LOGS
+   are NOT public: `/actions/runs/<run_id>/logs` returns 403 without a token.** Any plan
+   that depends on "push a print statement and read the public log" therefore needs Eli to
+   open it in a browser — worth knowing before proposing one.
    **Check the GAPS between runs, not just their conclusions** — the 2026-07-27 problem was 12
    consecutive *successful* runs spread over 24.5 hours, because GitHub silently drops
    scheduled runs on free public repos under load. Nothing looks broken when this happens; the
@@ -423,7 +428,14 @@ impossible; kept here so the symptom is recognised if it ever resurfaces in anot
    inactivity** (any commit resets it).
 3. **Is it browser-side?** `template.html` self-reloads on a 30-min timer plus a
    `visibilitychange` handler, because browsers freeze timers in backgrounded tabs.
-4. **Only then** look at feed coverage / throttling.
+4. **Is it the score cards specifically?** They are the one panel fetched by the BROWSER,
+   not by the build (since 2026-09-01), so they fail on a completely different axis from
+   everything else. **A browser-side failure and a build-time failure show the identical
+   "Scores unavailable right now." text**, so ask what the REST of the page looks like: a
+   healthy page around two dead score cards means his browser or ESPN, not the build.
+5. **Only then** look at feed coverage / throttling. **Since 2026-09-01 the first fetch pass
+   is concurrent** (`FETCH_WORKERS = 6`), so if coverage ever drops — channels or subjects
+   falling back to carried-forward data — **lower that number first.**
 
 A clean unthrottled 25-channel build takes **~108 seconds** locally (measured 2026-07-25) and
 run #1 in the cloud took **~2 minutes** end to end including `pip install`. Multi-minute runs
@@ -455,7 +467,7 @@ TBD — will be filled in as commands, routes, or user-facing operations are imp
 | --- | --- |
 | **v1** | Weather + stocks + YouTube + news panels, generated as a local `dashboard.html` opened on the laptop. **COMPLETE as of 2026-07-23.** |
 | **v2** | Reachable from Eli's phone, not dependent on Windows. **COMPLETE as of 2026-07-26** — GitHub Actions rebuilds on a schedule and publishes to GitHub Pages at **https://24emk24.github.io/dashboard/**. First cloud build passed on the first attempt; phone confirmed by Eli; laptop updater retired the same day. Refresh cadence was found to be far worse than the cron claimed and was reworked on 2026-07-27 (see the workflow notes above). |
-| **Score keeper** | Mariners + Seahawks scores at the top of the page (`panels/scores.py`). **Added 2026-07-28 on Eli's direct request**, outside the v1/v2/v3 tiers — it is not scope creep and it is not a v3 feature. Needs no key, no account and no new dependency (`requests` was already pinned), so it did not pull the project toward the server/database complexity v3 is holding back. |
+| **Score keeper** | Mariners + Seahawks scores at the top of the page. **Rebuilt 2026-09-01 to fetch in the BROWSER** (past 3 games + division standing; `panels/scores.py` now emits only shells). **Added 2026-07-28 on Eli's direct request**, outside the v1/v2/v3 tiers — it is not scope creep and it is not a v3 feature. Needs no key, no account and no new dependency (`requests` was already pinned), so it did not pull the project toward the server/database complexity v3 is holding back. |
 | **v3** | Price-drop alerts, notifications, and/or true cross-device state sync. The genuinely hard, optional tier. **Not started — do not begin any of it unprompted.** Note that `localStorage` (deletions, Watch Later) is per-browser AND per-origin, so laptop and phone each keep their own; real sync needs a backend, which the project has deliberately avoided so far. |
 
 ## Session Protocol
