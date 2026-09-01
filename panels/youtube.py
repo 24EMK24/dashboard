@@ -36,6 +36,7 @@ from zoneinfo import ZoneInfo
 # folder get_cached writes to; we read cache/youtube.json from it to carry channels over.
 from panels.common import (
     YOUTUBE_CHANNELS, get_cached, cached_time_label, CACHE_DIR, CACHE_MAX_AGE,
+    fetch_in_parallel,
 )
 
 # YouTube publishes one RSS feed per channel at this address; we fill in the channel id.
@@ -48,8 +49,12 @@ USER_AGENT = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 # Pacific time zone object, reused below. The whole dashboard works in Pacific.
 PACIFIC = ZoneInfo("America/Los_Angeles")
 
-# How long to wait between channels. A bigger gap makes YouTube far less likely to
-# throttle the burst of 23 requests (it used to be 1s, which started tripping the limit).
+# How long to wait between channels IN THE RETRY PASS. A bigger gap makes YouTube far less
+# likely to throttle (it used to be 1s, which started tripping the limit).
+# NOTE (2026-09-01): the FIRST pass no longer uses this — it fetches several channels at a
+# time via fetch_in_parallel instead, which is where ~62 seconds of every build was going.
+# The retry pass keeps the gap on purpose: it only runs when something has already come
+# back empty, which is exactly the moment to be gentle rather than fast.
 CHANNEL_GAP_SECONDS = 2.5
 # After the first pass, channels that still failed get ONE more try — but only after a
 # longer cool-off, since throttling is usually brief. This recovers most stragglers.
@@ -144,8 +149,21 @@ def fetch_youtube_data():
     failed = []                             # channels we got nothing for this pass
 
     # First pass: try every channel once (fetch_one_feed itself retries a few times).
-    for channel in YOUTUBE_CHANNELS:
-        entries = fetch_one_feed(channel["channel_id"])
+    #
+    # SPEED (changed 2026-09-01): this used to ask for one channel, sleep 2.5 seconds, ask
+    # for the next, and so on — about 62 seconds of pure waiting for 25 channels, which was
+    # most of the whole build. fetch_in_parallel asks for several at once instead. Same
+    # requests, same order of results, far less waiting. See the long note above
+    # FETCH_WORKERS in panels/common.py for why the pauses existed and why six at a time.
+    #
+    # The two safety nets below are UNCHANGED and still matter: the retry pass, and the
+    # carry-forward of last run's videos for a channel that stays empty.
+    entries_per_channel = fetch_in_parallel(
+        YOUTUBE_CHANNELS,
+        lambda channel: fetch_one_feed(channel["channel_id"]),
+    )
+
+    for channel, entries in zip(YOUTUBE_CHANNELS, entries_per_channel):
         if entries:
             for entry in entries:
                 video = entry_to_video(entry, channel["name"])
@@ -153,7 +171,6 @@ def fetch_youtube_data():
                     videos.append(video)
         else:
             failed.append(channel)          # remember it for the retry pass
-        time.sleep(CHANNEL_GAP_SECONDS)     # polite gap so we don't trip the rate limit
 
     # Second pass: give YouTube a longer breather, then retry only the ones that failed.
     if failed:

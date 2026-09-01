@@ -72,6 +72,13 @@ or credentials without explicit instruction.
 - **Claude cannot `git push`** — this shell has prompts disabled
   (`fatal: Cannot prompt because user interactivity has been disabled`). Git Credential
   Manager is installed system-wide, so **ask Eli to run `git push` in his own terminal.**
+  Claude CAN commit; the split is commit here, push there.
+- **Write multi-line commit messages to a file and use `git commit -F <file>`.** Do not pass
+  them with `-m`. A PowerShell here-string (`@'…'@`) in the PowerShell tool gets re-parsed
+  and git reads the fragments as pathspecs (`error: pathspec 'unavailable' did not match any
+  file(s)`); PowerShell here-string syntax inside the *Bash* tool fails differently, leaving a
+  stray `@` as the subject line. Both have now cost a session a failed commit. A message file
+  sidesteps every quoting rule in both shells.
 
 ## Running Things
 
@@ -94,6 +101,13 @@ or credentials without explicit instruction.
 - **Check whether the cloud build is healthy:** the Actions tab shows every run. The public
   API also works without auth, e.g.
   `https://api.github.com/repos/24EMK24/dashboard/actions/runs?per_page=5`.
+- **The Refresh button refreshes WEATHER AND SCORES, and nothing else** (scores added
+  2026-09-01). Those are the only two things the browser can fetch for itself; stocks,
+  YouTube and news are baked into the file by Python and can only change on a rebuild. Eli
+  raised this himself — the button "only refreshes the weather" — so **the label now names
+  what it really does** rather than saying a bare "Refresh". Do not relabel it back, and do
+  not wire stocks/YouTube/news into it: those feeds have no CORS permission for a browser
+  and the request would simply be refused.
 - **Open `dashboard.html` in a real browser (Chrome/Edge), NOT VS Code's Simple Browser** —
   the Simple Browser has no DevTools console and doesn't persist `localStorage`, so
   delete/Watch-Later won't stick. `Start-Process dashboard.html` opens the OS default browser.
@@ -140,6 +154,14 @@ Split into a **`panels/` package** (done at panel three, 2026-07-22). Layout:
   The `force_refresh` input is passed to the build step as **`env: FORCE_REFRESH`** and read by
   `force_refresh_requested()` in `panels/common.py`, which makes `get_cached()` ignore the
   15-minute cache. Without it a manual run inside that window republishes identical data.
+  **ACTION VERSIONS ARE PINNED PAST NODE 20 (bumped 2026-09-01):** `checkout@v7`,
+  `setup-python@v7`, `cache/restore`+`cache/save@v6`, `deploy-pages@v5`,
+  `upload-pages-artifact@v5`. Every manual run used to print "Node.js 20 is deprecated...
+  being forced to run on Node.js 24" — harmless then, a real failure once GitHub finishes
+  retiring that runtime. **Each version was verified by reading that tag's own `action.yml`
+  `runs.using:` field, not guessed** — the bumped majors say `node24`, the ones they replace
+  say `node20`. `upload-pages-artifact` is a `composite` action either way. If that warning
+  ever comes back, check the same field again rather than guessing a number.
   Steps: checkout → `setup-python` 3.12 (pip cached) → `pip install -r requirements.txt` →
   **restore `cache/`** → `python main.py` → **save `cache/`** → copy `dashboard.html` to
   `_site/index.html` → `upload-pages-artifact` → `deploy-pages`. `timeout-minutes: 20`,
@@ -173,6 +195,26 @@ Split into a **`panels/` package** (done at panel three, 2026-07-22). Layout:
   **`CACHE_MAX_AGE = 900`** (15 min) is the single source of truth for cache lifetime — every
   cached panel AND the freshness countdown use it, so use the constant, never a bare `900`,
   or the countdown will eventually contradict the panels.
+  **`fetch_in_parallel(items, fetch_one)` + `FETCH_WORKERS = 6` (added 2026-09-01)** — the
+  shared way every feed panel now fetches. It runs `fetch_one` over the items several at a
+  time in a `ThreadPoolExecutor` and returns the answers **lined up with the items you
+  passed in**, because replies do not arrive in the order they were asked for and the news
+  panel must keep Eli's `config.json` subject order. A job that raises leaves `None` in its
+  slot rather than bringing the build down.
+  **Why it exists:** a typical cloud build was 147 s, of which `python main.py` was ~111 s,
+  of which **~87 s was pure `time.sleep()`** — 25 YouTube channels and 10 news subjects,
+  each with a 2.5 s gap, one after another. Those pauses were written for Eli's throttled
+  home IP and were never re-examined after the build moved to GitHub's machines. **Measured
+  result: a full forced rebuild went from ~111 s to 5 s with NO loss of coverage** (25/25
+  channels, 375 videos, 10/10 news subjects, none empty).
+  **If throttling ever gets worse, LOWER `FETCH_WORKERS` — do not reach for anything
+  cleverer.** Six is a compromise, not an optimum: higher finishes sooner but looks more
+  like a burst, and runner IPs are shared with a very large number of other people. The
+  safety nets are unchanged and still do the real protecting — both panels still retry
+  whatever came back empty, and still carry a channel's or subject's last-known items
+  forward when it stays empty. The **retry passes deliberately KEEP their 2.5 s gaps**:
+  they only run after something already came back empty, which is the moment to be gentle
+  rather than fast.
   **`force_refresh_requested()`** reads the `FORCE_REFRESH` env var (set by the workflow's
   `force_refresh` checkbox) and makes `get_cached()` skip its freshness shortcut. It
   deliberately does **not** delete `cache/*.json` — the throttle carry-forward in
@@ -187,58 +229,70 @@ Split into a **`panels/` package** (done at panel three, 2026-07-22). Layout:
   **An in-page "rebuild now" button is not possible** — the page is static, and calling
   GitHub's API needs a token that anyone could read out of the public page source.
 - **`panels/scores.py`** — `build_scores_panel()`, filling the **`__SCORES__`** token between
-  the freshness strip and the widget grid (added 2026-07-28 at Eli's request). One compact card
-  per team in `config.json`'s **`sports_teams`** (Mariners, Seahawks): a **live score** when a
-  game is in progress, otherwise the last final, plus the next scheduled game. Source is
-  **ESPN's public `site.api.espn.com` endpoint** — no key, no account, matching every other
-  source on this project — at
-  `/apis/site/v2/sports/<sport>/<league>/teams/<team>/schedule`. One request per team returns
-  the whole season, so finals and fixtures come from a single fetch (~0.5 s for both teams;
-  the MLB payload is ~2.4 MB, which is why only the parsed handful of facts is cached, never
-  the raw response). **It is an undocumented API** — the one ESPN's own site calls — so expect
-  it to break someday; the fail-soft wrapper and the per-team `try` handle that, and one
-  team failing still renders the other.
-  **NEVER PUT `Chrome/<version>` IN THIS PANEL'S User-Agent (learned the hard way,
-  2026-08-04).** ESPN's front door answers **403 "Access Denied"** to any request whose
-  User-Agent claims to be Chrome. This had killed the panel outright — both cards on the live
-  page read "Scores unavailable right now." Narrowed down by building the string up one piece
-  at a time: 200 all the way through `…AppleWebKit/537.36 (KHTML, like Gecko)`, then **403 the
-  moment `Chrome/122.0` was appended**. Plain `python-requests` and no User-Agent at all both
-  get 200. Use the short `"Mozilla/5.0 (Windows NT 10.0; Win64; x64)"` form that
-  `youtube.py` and `news.py` use — all three panels now match. **General lesson: fail-soft
-  hides outages as well as surviving them.** Nothing announced that scores had been dead on
-  the live page; check the real page, not just the code, when judging whether a panel works.
-  **LIVE SCORES COME FROM A DIFFERENT ENDPOINT (`fetch_live_score()`, added 2026-08-04).**
-  The `/schedule` address above carries **no score at all while a game is being played** —
-  verified against four teams mid-game, whose competitor records have no `score` key until
-  the game finishes. Only the `status` is there, which is why the card showed a LIVE badge
-  and "Top 4th" but no numbers. The live numbers live at
-  `/apis/site/v2/sports/<sport>/<league>/scoreboard`, which lists today's games league-wide;
-  `fetch_live_score()` is called **only when the schedule reports a game in progress**, so an
-  ordinary day still costs one request per team, and it has its own try/except so a
-  scoreboard outage costs the numbers rather than the card.
-  **`score_of()` must handle TWO score shapes** because ESPN is inconsistent between its own
+  the freshness strip and the widget grid. One compact card per team in `config.json`'s
+  **`sports_teams`** (Mariners, Seahawks).
+  **THIS PANEL NO LONGER FETCHES ANYTHING — THE BROWSER DOES (changed 2026-09-01).** Python
+  now emits only the card SHELL: an empty card per team carrying `data-sport` /
+  `data-league` / `data-team` / `data-name`, plus `data-past-games` on the strip. All the
+  fetching, parsing and rendering lives in `template.html`'s script (see below). There is
+  no `cache/scores.json` any more, no `SCORES_MAX_AGE`, and no build-time "As of" stamp.
+  **Two reasons it moved.** (1) **ESPN refuses GitHub's runner IPs.** The panel was dead on
+  the live page for four weeks — both cards read "Scores unavailable right now." from
+  2026-08-04 to 2026-09-01 — while the identical code fetched fine from Eli's laptop
+  throughout (re-confirmed 2026-09-01: HTTP 200, Mariners 64-74). Nothing we can write
+  changes whose machine the build runs on. (2) **A baked-in score is only as fresh as the
+  last rebuild**, and the rebuild cadence is measured at ~16% of what the cron asks for,
+  with gaps up to 12.5 hours. Browser-side, the score is as new as the moment you look.
+  **What made it possible: ESPN sends `Access-Control-Allow-Origin: *`** on both
+  `/schedule` and `/scoreboard` (verified by sending an `Origin:` header from the real
+  published address — check this before assuming any other API can move the same way).
+  **Payload is a non-issue despite appearances:** the MLB season schedule is 2.6 MB of text
+  but **92 KB on the wire** because the server gzips it and browsers ask for that
+  automatically; the NFL one is 4 KB. Both teams ≈ 96 KB per page load. Note ESPN **ignores
+  a `limit` param** on that address, so do not bother trying to trim it that way.
+- **The score logic itself now lives in `template.html`** (`refreshScores`, `loadTeamCard`,
+  `readGame`, `scoreOf`, `fetchLiveScore`, `renderGameLine`, and the Pacific-time helpers
+  `pacificYmd` / `pacificClock` / `pacificDayLabel` / `whenLabel`). It is a close
+  TRANSLATION of the Python that used to do the job — which had been verified against three
+  genuinely live games — not a fresh guess at ESPN's shapes. Keep it that way.
+  **`scoreOf()` must handle TWO score shapes** because ESPN is inconsistent between its own
   endpoints: `/schedule` gives `{"value": 4.0, "displayValue": "4"}` on a finished game,
   `/scoreboard` gives the plain string `"4"` on a live one.
-  **Do not "verify" the live path with a synthetic fixture again** — session 9 did exactly
-  that, built it with the finished-game shape, and shipped a bug Eli then found. Point the
-  code at a team that is genuinely playing (any league, `/scoreboard` lists them) instead.
-  **CONFIRMED 2026-07-28: ESPN does not throttle GitHub's runner IP** — cloud run #25 fetched
-  both teams from an empty cache and rendered correctly. That was a genuine risk worth
-  retesting if scores ever go blank in the cloud but work locally, since YouTube and Google
-  have both throttled shared IPs on this project before.
-  **`SCORES_MAX_AGE = 300` (5 min) deliberately differs from `CACHE_MAX_AGE`** — a 15-minute-old
-  score is several innings behind, and the 15-minute rule exists to avoid YouTube/Google
-  throttling, which does not apply to two small ESPN requests.
-  **Scores are deliberately NOT in `panels/freshness.py`'s `SOURCES`:** that countdown reports
-  the soonest-expiring cache, so a 5-minute source would peg it to "Ready" permanently and
-  destroy its signal about YouTube and news. The card carries its own "As of" stamp instead.
-  Read the ESPN `status.type.state` field as `pre` / `in` / `post`. The record is shown **only
-  once the season has games played** (`show_record`) — out of season ESPN still reports LAST
-  season's record, and the Seahawks reading "14-3" beside a September fixture looks like this
-  year's result. Game start times are cached as epoch **seconds** and turned into
-  "Today 7:10 PM" / "Tomorrow" at RENDER time, so a cached label cannot be left saying "Today"
-  after midnight.
+  **Live scores come from a different endpoint.** `/schedule` carries **no score at all
+  while a game is being played** (verified against four mid-game teams, 2026-08-04) — only
+  the `status`, which is why a LIVE badge once showed with no numbers. `fetchLiveScore()`
+  reads `/scoreboard`, and is called **only when the schedule reports a game in progress**,
+  so an ordinary day costs one request per team. It has its own try/catch: a scoreboard
+  outage costs the numbers, not the card.
+  **Pacific time must be done with `Intl`, not the Date object's own getters.** The page now
+  runs on Eli's phone wherever it is; `getDate()` answers in the *device's* zone, so a
+  7:10 PM Pacific game would land on the wrong calendar day for anyone east of us — and
+  "Today" is exactly the word that must not be wrong.
+  **TWO REAL BUGS WERE FOUND AGAINST LIVE DATA ON 2026-09-01 — do not regress them:**
+  (a) **ESPN answers the NFL schedule with the PRESEASON in early September.** The default
+  address returned 3 finished exhibition games and *nothing upcoming*, so the Seahawks card
+  showed preseason losses and no "Next:" line on the weekend of the season opener. Fixed by
+  re-asking with **`?seasontype=2`** (ESPN's number for the regular season, 17 real
+  fixtures) **only when the first reply had nothing upcoming** — so it costs no extra
+  request on an ordinary day.
+  (b) **ESPN marks BOTH teams `winner: false` in a tie**, which is indistinguishable from a
+  loss if you only read our own side. A real Seahawks 9-9 at the Chiefs was rendering as an
+  "L". Ties are now detected by **comparing the two scores**, not by trusting the flag.
+  **The card shows the past THREE finished games** (`PAST_GAMES_SHOWN` in `scores.py`,
+  handed to the browser via `data-past-games` so the number lives in one place), added
+  2026-09-01 at Eli's request. The newest result keeps the big type; the earlier ones sit
+  in a smaller, dimmer `.score-past` list so the strip stays one short row.
+  **The record and division standing** come from the reply's own `team` block
+  (`recordSummary`, `standingSummary` — "64-74 · 3rd in AL West"). Shown **only once the
+  season has games played**: out of season ESPN still reports LAST season's record, and the
+  Seahawks reading "14-3" beside a September fixture looks like this year's result.
+  **Scores are deliberately NOT in `panels/freshness.py`'s `SOURCES`** — that countdown
+  reports the soonest-expiring cache, and scores no longer have one at all. The strip
+  carries its own browser-side "As of" stamp instead.
+  Read the ESPN `status.type.state` field as `pre` / `in` / `post`.
+  **Do not "verify" the live path with a synthetic fixture** — session 9 did exactly that,
+  built it with the finished-game shape, and shipped a bug Eli then found. Point the code
+  at a team that is genuinely playing (`/scoreboard` lists them across a league).
 - **`panels/weather.py`** — `build_weather_panel()` (Open-Meteo, Pacific). Its `weather_label`
   / `to_ampm` are MIRRORED by JS in `template.html`; keep the two in sync.
 - **`panels/stocks.py`** — `build_stocks_panel()` (yfinance, cached, sparklines).
@@ -260,6 +314,10 @@ Split into a **`panels/` package** (done at panel three, 2026-07-22). Layout:
   a later run is throttled (the render step's today-filter still drops genuinely old ones
   at midnight). `entry_to_video()` builds each video dict for both passes. `fetch_one_feed`
   does NOT sleep after its final failed attempt (keeps heavy-throttle runs from dragging).
+  **The FIRST pass is now concurrent (2026-09-01)** — it goes through
+  `fetch_in_parallel()` (see `panels/common.py`) instead of one channel at a time with a
+  2.5 s gap, which is where ~62 s of every build was going. `CHANNEL_GAP_SECONDS` still
+  applies to the RETRY pass. The retry pass and the carry-forward are unchanged.
   **Adding a channel:** resolve the `UC…` id from the channel page's `<link rel="canonical">`,
   verify the feed returns entries, then add `{name, channel_id}` to `config.json`. Be aware the
   900 s cache TTL means a rebuild within ~15 minutes of the last fetch serves the OLD cached
@@ -292,6 +350,9 @@ Split into a **`panels/` package** (done at panel three, 2026-07-22). Layout:
   (`load_previous_by_subject()`) when it's still empty, so one throttled Google run no longer
   blanks the widget. `entry_to_item()` builds each item dict for both passes. (Before this it
   used the pre-session-3 fragile fetch: one try, 1s gap, no retry, no carry-forward.)
+  **The FIRST pass is now concurrent (2026-09-01)**, via `fetch_in_parallel()` — see
+  `panels/common.py`. The subject records are built up front so the results come back in
+  Eli's `config.json` order; `SUBJECT_GAP_SECONDS` still applies to the RETRY pass.
   **Today-only (Pacific)**, like "New Today". At
   render time it **clusters headlines into "stories"** by crude shared-word overlap
   (`significant_words`/`same_story`/`cluster_stories`) — IMPORTANT: it ignores each subject's

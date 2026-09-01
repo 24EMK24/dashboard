@@ -45,6 +45,7 @@ from zoneinfo import ZoneInfo
 # when Google throttles a fetch.
 from panels.common import (
     NEWS_SUBJECTS, get_cached, cached_time_label, CACHE_DIR, CACHE_MAX_AGE,
+    fetch_in_parallel,
 )
 
 # A normal browser User-Agent, so Google News serves the feed instead of throttling us.
@@ -57,9 +58,12 @@ PACIFIC = ZoneInfo("America/Los_Angeles")
 # How many stories to show per subject (the rest are reachable by scrolling the widget).
 STORIES_PER_SUBJECT = 4
 
-# How long to wait between subjects. A bigger gap makes Google far less likely to throttle
-# the burst of requests. Same values the YouTube panel settled on, so both panels behave
-# the same way (it used to be 1s here, which offered no real protection).
+# How long to wait between subjects IN THE RETRY PASS. A bigger gap makes Google far less
+# likely to throttle. Same values the YouTube panel settled on, so both panels behave the
+# same way (it used to be 1s here, which offered no real protection).
+# NOTE (2026-09-01): the FIRST pass no longer uses this — it fetches several subjects at a
+# time via fetch_in_parallel. The retry pass keeps the gap deliberately: it only runs after
+# something already came back empty, which is the moment to be gentle rather than fast.
 SUBJECT_GAP_SECONDS = 2.5
 # After the first pass, subjects that still returned nothing get ONE more try — but only
 # after a longer cool-off, since throttling is usually brief. This recovers most stragglers.
@@ -170,16 +174,32 @@ def fetch_news_data():
     subjects = []
     failed = []                             # subject records we got nothing for this pass
 
-    # First pass: try every subject once (fetch_one_feed itself retries a few times).
+    # Build one record per subject first, in Eli's own config.json order. Keep the query
+    # too, so the renderer can ignore the subject's own words when deciding which
+    # headlines are the same story (see build_news_panel).
     for subject in NEWS_SUBJECTS:
-        # Keep the query too, so the renderer can ignore the subject's own words when
-        # deciding which headlines are the same story (see build_news_panel).
-        record = {
+        subjects.append({
             "name": subject.get("name", "News"),
             "query": subject.get("query", ""),
             "items": [],
-        }
-        entries = fetch_one_feed(feed_url_for(record["query"]))
+        })
+
+    # First pass: try every subject once (fetch_one_feed itself retries a few times).
+    #
+    # SPEED (changed 2026-09-01): this used to ask for one subject, sleep 2.5 seconds, ask
+    # for the next — about 25 seconds of pure waiting for 10 subjects, on top of YouTube's
+    # 62. fetch_in_parallel asks for several at once instead, and hands the answers back
+    # lined up with the subjects, so the order Eli listed them in is preserved. See the
+    # long note above FETCH_WORKERS in panels/common.py.
+    #
+    # The two safety nets below are UNCHANGED: the retry pass, and the carry-forward of
+    # last run's items for a subject that stays empty.
+    entries_per_subject = fetch_in_parallel(
+        subjects,
+        lambda record: fetch_one_feed(feed_url_for(record["query"])),
+    )
+
+    for record, entries in zip(subjects, entries_per_subject):
         if entries:
             for entry in entries:
                 item = entry_to_item(entry)
@@ -187,8 +207,6 @@ def fetch_news_data():
                     record["items"].append(item)
         else:
             failed.append(record)           # remember it for the retry pass
-        subjects.append(record)
-        time.sleep(SUBJECT_GAP_SECONDS)      # polite gap so we don't trip the rate limit
 
     # Second pass: give Google a longer breather, then retry only the ones that failed.
     if failed:

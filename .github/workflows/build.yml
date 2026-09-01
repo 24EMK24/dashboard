@@ -77,14 +77,27 @@ jobs:
     timeout-minutes: 20
 
     steps:
+      # A NOTE ON THE "@v7" / "@v6" / "@v5" VERSION NUMBERS BELOW (bumped 2026-09-01).
+      # Every one of these actions is a small program GitHub runs for us, and each declares
+      # which version of Node.js it needs. GitHub is retiring Node 20, so any run using the
+      # older versions printed a warning on every build:
+      #   "Node.js 20 is deprecated. The following actions ... are being forced to run on
+      #    Node.js 24."
+      # It was only a warning — nothing was broken — but it becomes a real failure once
+      # GitHub finishes the retirement. These versions were each checked by reading that
+      # tag's own action.yml "runs.using:" field, NOT guessed: checkout@v7, setup-python@v7,
+      # cache@v6 and deploy-pages@v5 all say "node24", while the v4/v5/v4 they replace say
+      # "node20". upload-pages-artifact is a "composite" action (it has no Node runtime of
+      # its own) and was moved to v5 only so the whole file stays on current majors.
+
       # 1. Copy the project files onto the runner.
       - name: Get the project files
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # 2. Install Python. "cache: pip" saves the downloaded packages between
       #    runs so the install step is fast after the first time.
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -102,7 +115,7 @@ jobs:
       #    "restore-keys" means: if there is no exact match, take the most
       #    recent cache whose name starts with "dashboard-cache-".
       - name: Restore the previous run's cached feed data
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: cache
           key: dashboard-cache-${{ github.run_id }}
@@ -124,7 +137,7 @@ jobs:
       #    even if a later step fails.
       - name: Save the cached feed data for next time
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: cache
           key: dashboard-cache-${{ github.run_id }}
@@ -139,10 +152,10 @@ jobs:
 
       # 7. Hand that folder to Pages and publish it.
       - name: Package the folder for Pages
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: _site
 
       - name: Publish to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

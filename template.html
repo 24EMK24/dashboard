@@ -235,6 +235,18 @@
   .score-when { font-size: 0.7rem; color: #6a819a; margin-left: auto; }
   .score-next { font-size: 0.75rem; color: #4a6076; margin-top: 0.3rem; }
   .score-empty { font-size: 0.8rem; color: #4a6076; }
+
+  /* The earlier finished games under the newest one (added 2026-09-01 — Eli asked to see
+     "the past three" rather than only the latest). They are deliberately smaller and
+     dimmer than the top line: the card's job is still "what just happened / what is
+     happening", and three full-sized scores stacked up would turn a one-glance strip into
+     a wall of numbers. The newest result keeps the big type; these are history. */
+  .score-past { margin-top: 0.35rem; display: flex; flex-direction: column; gap: 0.2rem; }
+  .score-past .score-line { gap: 0.35rem; }
+  .score-past .score-pill { font-size: 0.6rem; padding: 0.08rem 0.34rem; }
+  .score-past .score-nums { font-size: 0.82rem; font-weight: 600; color: #4a6076; }
+  .score-past .score-vs { font-size: 0.75rem; color: #4a6076; }
+  .score-past .score-when { font-size: 0.66rem; }
   /* When the scores were really fetched. flex-basis:100% forces it onto its own line
      underneath the cards. */
   .score-stamp { flex-basis: 100%; font-size: 0.68rem; color: #6a819a; }
@@ -243,9 +255,11 @@
 <body>
 <div class="page-head">
 <h1>Eli's Dashboard</h1>
-<!-- One button to refresh the whole dashboard. It re-fetches every widget that can
-     update live in the browser (weather); Python-built widgets (stocks, YouTube) stay put. -->
-<button id="refresh-btn" onclick="refreshAll()">Refresh &#8635;</button>
+<!-- One button to refresh the parts of the page the browser can fetch for itself:
+     weather, and the score cards. Python-built widgets (stocks, YouTube, news) are baked
+     into the file and stay put until a rebuild — the label names what it really does
+     rather than implying a full refresh. -->
+<button id="refresh-btn" onclick="refreshAll()">Refresh weather &amp; scores &#8635;</button>
 </div>
 
 <!-- How old the data is, and whether forcing a rebuild would actually fetch anything new.
@@ -405,17 +419,430 @@ async function refreshWeather() {
   }
 }
 
-// The universal Refresh button. It refreshes every widget that CAN update live in
-// the browser — right now that is only weather. Stocks and YouTube are built by
-// Python, so they keep their "As of ..." data until the script is re-run; the button
-// leaves them untouched on purpose.
+// The Refresh button. It refreshes every widget that CAN update live in the browser:
+// weather, and — since 2026-09-01 — the score cards too.
+//
+// WHY IT SAYS "Refresh weather &amp; scores" RATHER THAN JUST "Refresh": Eli's own words
+// were that the button was "kind of stupid because to my knowledge it only refreshes the
+// weather", and he was exactly right. Stocks, YouTube and news are baked into the page by
+// Python when the file is built, so nothing the browser does can update them — the only
+// way to refresh those is a rebuild, which is what the "Run a rebuild" link in the
+// freshness strip is for. A button labelled just "Refresh" quietly promises more than it
+// can deliver, so it now names the two things it genuinely does.
+//
+// The two fetches are started TOGETHER with Promise.all rather than one after the other,
+// so pressing the button costs about as long as the slower of the two instead of the sum.
 async function refreshAll() {
   const btn = document.getElementById("refresh-btn");
   btn.disabled = true;
   btn.innerHTML = "Refreshing…";
-  await refreshWeather();
+  await Promise.all([refreshWeather(), refreshScores()]);
   btn.disabled = false;
-  btn.innerHTML = "Refresh &#8635;";
+  btn.innerHTML = "Refresh weather &amp; scores &#8635;";
+}
+
+// ==================================================================
+// The score keeper (Mariners / Seahawks)
+// ------------------------------------------------------------------
+// These cards are fetched HERE, in the browser, not by Python when the page is built.
+// The full reasoning is at the top of panels/scores.py; the short version is that ESPN
+// refuses GitHub's build machines (the panel read "Scores unavailable right now." on the
+// live page for four weeks) but answers a browser perfectly well, and a score baked in at
+// build time is only as fresh as the last rebuild — which can be twelve hours ago.
+//
+// Everything below is a close translation of the Python that used to do this job. That
+// code had been checked against three genuinely live games, so translating it is safer
+// than writing a fresh guess at how ESPN shapes its replies. The comments explaining
+// ESPN's quirks are kept with the code that has to cope with them.
+
+// The address every request here starts from.
+const ESPN_BASE = "https://site.api.espn.com/apis/site/v2/sports/";
+
+// Everything on this dashboard is shown in Pacific time, whatever the phone is set to.
+const SCORES_TZ = "America/Los_Angeles";
+
+// Turn a moment into "2026-09-01" AS IT WAS IN PACIFIC. Doing this with Intl rather than
+// with the Date object's own getDate()/getMonth() matters: those answer in whatever time
+// zone the viewer's device is set to, so a 7:10 PM Pacific game would land on the wrong
+// calendar day for anyone east of us — and "Today" is exactly the kind of word that must
+// not be wrong. "en-CA" is used because it formats dates as YYYY-MM-DD, which sorts and
+// compares as plain text.
+function pacificYmd(date) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: SCORES_TZ, year: "numeric", month: "2-digit", day: "2-digit"
+  }).format(date);
+}
+
+// "7:10 PM" in Pacific.
+function pacificClock(date) {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: SCORES_TZ, hour: "numeric", minute: "2-digit", hour12: true
+  }).format(date);
+}
+
+// "Mon Sep 1" in Pacific. The replace strips the comma en-US puts after the weekday,
+// so it matches the wording the Python version used.
+function pacificDayLabel(date) {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: SCORES_TZ, weekday: "short", month: "short", day: "numeric"
+  }).format(date).replace(",", "");
+}
+
+// How many calendar days ahead a moment is, counted in Pacific days. Both sides are
+// turned into a Pacific YYYY-MM-DD first and only then into a date, so the answer is a
+// whole number of days and never depends on the time of day or on the viewer's zone.
+function pacificDaysAway(date) {
+  const asDay = function (text) {
+    const parts = text.split("-");
+    return Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+  };
+  const oneDay = 24 * 60 * 60 * 1000;
+  return Math.round((asDay(pacificYmd(date)) - asDay(pacificYmd(new Date()))) / oneDay);
+}
+
+// "Today 7:10 PM" / "Tomorrow 1:05 PM" / "Sat Sep 5 6:40 PM" for a game still to come.
+// Worked out when the card is drawn, never stored, so it cannot be left saying "Today"
+// about yesterday on a tab that has been open overnight.
+function whenLabel(date) {
+  if (!date) { return ""; }
+  const daysAway = pacificDaysAway(date);
+  if (daysAway === 0) { return "Today " + pacificClock(date); }
+  if (daysAway === 1) { return "Tomorrow " + pacificClock(date); }
+  return pacificDayLabel(date) + " " + pacificClock(date);
+}
+
+// Pull one team's score out of one of ESPN's "competitor" records (a competitor is one of
+// the two teams in a game).
+//
+// ESPN writes the score in TWO different shapes depending on which address it came from,
+// so this has to cope with both:
+//   * the /schedule address, finished game -> {"value": 4.0, "displayValue": "4"}
+//   * the /scoreboard address, live game   -> "4"   (just a plain piece of text)
+// A game that has not started carries no score at all, and returns null here, which tells
+// the card to leave the numbers off.
+function scoreOf(side) {
+  const score = side.score;
+  if (score === null || score === undefined) { return null; }
+  if (typeof score === "object") {
+    return score.displayValue === undefined ? null : String(score.displayValue);
+  }
+  return String(score);
+}
+
+// Reduce one of ESPN's game records down to the handful of facts a card needs.
+// Returns null if the record is not shaped the way we expect, so one odd entry in a
+// 162-game season cannot take the whole card down with it.
+function readGame(event, ourAbbreviation) {
+  const competitions = event.competitions || [];
+  if (!competitions.length) { return null; }
+  const competition = competitions[0];
+
+  const competitors = competition.competitors || [];
+  if (competitors.length !== 2) { return null; }
+
+  // Work out which of the two is our team and which is the opponent.
+  let ours = null;
+  let theirs = null;
+  competitors.forEach(function (side) {
+    const abbreviation = (side.team || {}).abbreviation;
+    if (abbreviation === ourAbbreviation) { ours = side; } else { theirs = side; }
+  });
+  if (!ours || !theirs) { return null; }
+
+  // "status.type.state" is ESPN's word for where the game is up to:
+  //   "pre" = not started yet, "in" = being played now, "post" = finished.
+  const statusType = ((competition.status || {}).type) || {};
+
+  return {
+    state: statusType.state,
+    // "shortDetail" is ESPN's own summary of the moment: "Final", "Bot 7th", "Q3 5:42".
+    detail: statusType.shortDetail || statusType.description || "",
+    opponent: (theirs.team || {}).shortDisplayName || "",
+    // Whether WE are the home team, so the card can say "vs" or "@".
+    atHome: ours.homeAway === "home",
+    ourScore: scoreOf(ours),
+    theirScore: scoreOf(theirs),
+    // true/false on a finished game, undefined before it is played.
+    won: ours.winner,
+    // new Date() understands ESPN's "2026-09-01T22:45Z" as written.
+    startsAt: event.date ? new Date(event.date) : null
+  };
+}
+
+// Get the score of a game being played RIGHT NOW.
+//
+// WHY THIS EXISTS (found 2026-08-04, after Eli saw a LIVE badge with no numbers beside
+// it): the /schedule address — the one that gives us the season, the finished games and
+// the fixtures — does NOT carry a score while a game is in progress. Checked against four
+// teams that were mid-game at the time, and the team's record in that reply has no score
+// field at all until the game finishes. The badge and the inning showed up (those come
+// from the status, which IS there) and the score silently did not.
+//
+// The live numbers live at a different address, /scoreboard, which lists today's games
+// across the whole league. It is only asked for when a game is actually on, so an
+// ordinary day costs one request per team.
+async function fetchLiveScore(sport, league, ourAbbreviation) {
+  const response = await fetch(ESPN_BASE + sport + "/" + league + "/scoreboard");
+  if (!response.ok) { throw new Error("HTTP " + response.status); }
+  const data = await response.json();
+
+  const events = data.events || [];
+  for (let i = 0; i < events.length; i++) {
+    const competitions = events[i].competitions || [];
+    if (!competitions.length) { continue; }
+    const competition = competitions[0];
+
+    let ours = null;
+    let theirs = null;
+    (competition.competitors || []).forEach(function (side) {
+      const abbreviation = (side.team || {}).abbreviation;
+      if (abbreviation === ourAbbreviation) { ours = side; } else { theirs = side; }
+    });
+    if (!ours || !theirs) { continue; }
+
+    // Only take the score from a game that really is in progress. If the scoreboard says
+    // the game has already finished, the schedule's own finished-game record is the
+    // better source and we leave it alone.
+    const statusType = ((competition.status || {}).type) || {};
+    if (statusType.state !== "in") { continue; }
+
+    return {
+      ourScore: scoreOf(ours),
+      theirScore: scoreOf(theirs),
+      // The scoreboard's own "Bot 7th" wording, a moment fresher than the schedule's copy.
+      detail: statusType.shortDetail || ""
+    };
+  }
+  return null;
+}
+
+// "vs Dodgers" when we are at home, "@ Dodgers" when we are away.
+function opponentLabel(game) {
+  return (game.atHome ? "vs " : "@ ") + game.opponent;
+}
+
+// Build the one line of a card that carries a score, as real elements rather than as a
+// string of HTML. Everything from ESPN goes in through textContent, so a team name could
+// never smuggle markup onto the page — the same habit the Watch Later list follows.
+function renderGameLine(game, isLive) {
+  const line = document.createElement("div");
+  line.className = "score-line";
+
+  // A drawn game has to be spotted by comparing the scores, NOT by trusting the winner
+  // flag. ESPN marks BOTH teams "winner: false" in a tie, which is indistinguishable from
+  // a loss if you only look at our own side — found 2026-09-01 on a real game, Seahawks
+  // 9-9 at the Chiefs, which was rendering as an "L".
+  const isTie = !isLive
+    && game.ourScore !== null && game.theirScore !== null
+    && game.ourScore === game.theirScore;
+
+  const pill = document.createElement("span");
+  pill.className = "score-pill";
+  if (isLive) {
+    pill.className += " score-live";
+    pill.textContent = "LIVE";
+  } else if (isTie) {
+    pill.textContent = "T";
+  } else if (game.won === true) {
+    pill.className += " score-win";
+    pill.textContent = "W";
+  } else if (game.won === false) {
+    pill.className += " score-loss";
+    pill.textContent = "L";
+  } else {
+    // A finished game with no winner recorded and no scores — usually a postponement.
+    pill.innerHTML = "&mdash;";
+  }
+  line.appendChild(pill);
+
+  // The score itself, our number first so it reads the way Eli would say it.
+  if (game.ourScore !== null && game.theirScore !== null) {
+    const nums = document.createElement("span");
+    nums.className = "score-nums";
+    nums.textContent = game.ourScore + "–" + game.theirScore;   // en dash
+    line.appendChild(nums);
+  }
+
+  const versus = document.createElement("span");
+  versus.className = "score-vs";
+  versus.textContent = opponentLabel(game);
+  line.appendChild(versus);
+
+  // For a live game the inning/quarter matters; for a finished one the date does.
+  const trailing = isLive
+    ? (game.detail || "")
+    : (game.startsAt ? pacificDayLabel(game.startsAt) : "");
+  if (trailing) {
+    const when = document.createElement("span");
+    when.className = "score-when";
+    when.textContent = trailing;
+    line.appendChild(when);
+  }
+
+  return line;
+}
+
+// Fetch one team and fill in its card. Each card is on its own: one team failing must
+// never cost the other, which is why the caller wraps each call separately.
+async function loadTeamCard(card, pastGamesShown) {
+  const sport = card.dataset.sport;
+  const league = card.dataset.league;
+  const team = card.dataset.team;
+
+  const body = card.querySelector(".score-body");
+  const recordSpan = card.querySelector(".score-record");
+
+  const response = await fetch(ESPN_BASE + sport + "/" + league + "/teams/" + team + "/schedule");
+  if (!response.ok) { throw new Error("HTTP " + response.status); }
+  const data = await response.json();
+
+  // The reply's own "team" block carries the season record and the league position.
+  const teamBlock = data.team || {};
+  const ourAbbreviation = teamBlock.abbreviation || team.toUpperCase();
+
+  // Sort every game in the season into finished / playing now / still to come.
+  const played = [];
+  let playingNow = null;
+  const upcoming = [];
+  (data.events || []).forEach(function (event) {
+    const game = readGame(event, ourAbbreviation);
+    if (!game) { return; }
+    if (game.state === "post") { played.push(game); }
+    else if (game.state === "in") { playingNow = game; }
+    else if (game.state === "pre") { upcoming.push(game); }
+  });
+
+  // WHEN ESPN HANDS BACK THE WRONG SEASON (found 2026-09-01 against the real Seahawks).
+  // That address answers with whichever part of the season ESPN considers current, and in
+  // early September for the NFL that is still the PRESEASON: three finished exhibition
+  // games and nothing at all coming up. The card was showing three preseason results and
+  // no "Next:" line, on the very weekend Eli would be looking for the season opener.
+  //
+  // Asking again with "?seasontype=2" — ESPN's number for the regular season — returns the
+  // real 17-game fixture list (verified: NE @ SEA on Sep 10, through to the Rams in
+  // January). This only runs when the first reply had NOTHING upcoming, so on any ordinary
+  // day, in any sport, it costs no extra request at all. Wrapped on its own: if the second
+  // ask fails we simply keep what the first one gave us.
+  if (!upcoming.length) {
+    try {
+      const seasonResponse = await fetch(
+        ESPN_BASE + sport + "/" + league + "/teams/" + team + "/schedule?seasontype=2");
+      if (seasonResponse.ok) {
+        const seasonData = await seasonResponse.json();
+        (seasonData.events || []).forEach(function (event) {
+          const game = readGame(event, ourAbbreviation);
+          if (game && game.state === "pre") { upcoming.push(game); }
+        });
+      }
+    } catch (e) {
+      // Keep whatever the first reply gave us.
+    }
+  }
+
+  // A game in progress arrives from the address above with NO score on it (see
+  // fetchLiveScore), so go and get the numbers separately. Wrapped on its own: if the
+  // scoreboard is down we still show the LIVE badge and the inning, just without a
+  // score — a worse card, but far better than losing it entirely.
+  if (playingNow) {
+    try {
+      const liveScore = await fetchLiveScore(sport, league, ourAbbreviation);
+      if (liveScore) {
+        playingNow.ourScore = liveScore.ourScore;
+        playingNow.theirScore = liveScore.theirScore;
+        if (liveScore.detail) { playingNow.detail = liveScore.detail; }
+      }
+    } catch (e) {
+      // No numbers, but keep the card.
+    }
+  }
+
+  // The record and where the team sits in its division, e.g. "64-74 · 3rd in AL West".
+  // Only shown once the season has games played: out of season ESPN still reports LAST
+  // season's record, and the Seahawks reading "14-3" beside a September fixture would
+  // look like this year's result.
+  recordSpan.textContent = "";
+  if (played.length > 0 && teamBlock.recordSummary) {
+    let recordText = teamBlock.recordSummary;
+    if (teamBlock.standingSummary) {
+      recordText += " · " + teamBlock.standingSummary;     // a middle dot
+    }
+    recordSpan.textContent = recordText;
+  }
+
+  // Now rebuild everything under the heading.
+  body.innerHTML = "";
+
+  // A game happening right now beats everything else — that is the whole point of the
+  // strip. The newest finished result takes the top line otherwise.
+  //
+  // "played" comes back from ESPN in date order, so the newest finished game is the LAST
+  // one. .slice(-n) takes the final n entries and .reverse() puts the newest first.
+  const recent = played.slice(-pastGamesShown).reverse();
+
+  if (playingNow) {
+    body.appendChild(renderGameLine(playingNow, true));
+  } else if (recent.length) {
+    body.appendChild(renderGameLine(recent.shift(), false));
+  }
+
+  // Whatever results are left go underneath in the smaller history list (Eli asked to see
+  // "the past three" rather than only the latest). When a game is live, all three recent
+  // results sit here; otherwise the newest one is already the big line above.
+  if (recent.length) {
+    const past = document.createElement("div");
+    past.className = "score-past";
+    recent.forEach(function (game) { past.appendChild(renderGameLine(game, false)); });
+    body.appendChild(past);
+  }
+
+  // And always say what's next, so the card is useful on a day with no game.
+  if (upcoming.length) {
+    const next = document.createElement("div");
+    next.className = "score-next";
+    next.textContent = "Next: " + opponentLabel(upcoming[0])
+      + " · " + whenLabel(upcoming[0].startsAt);
+    body.appendChild(next);
+  } else if (!playingNow && !played.length) {
+    const none = document.createElement("div");
+    none.className = "score-empty";
+    none.textContent = "No games scheduled.";
+    body.appendChild(none);
+  }
+}
+
+// Refresh every score card. Called once when the page loads, and again whenever Eli
+// presses the Refresh button.
+async function refreshScores() {
+  const strip = document.getElementById("scores-strip");
+  if (!strip) { return; }              // no teams configured; nothing to do
+  const cards = strip.querySelectorAll(".score-card");
+  const stamp = document.getElementById("score-stamp");
+
+  // How many finished games to list, handed over by Python so the number lives in one
+  // place (PAST_GAMES_SHOWN in panels/scores.py).
+  const pastGamesShown = Number(strip.dataset.pastGames) || 3;
+
+  // Both teams are fetched at the same time rather than one after the other. Each is
+  // wrapped in its own catch so a failure becomes one card saying so, not a thrown error
+  // that leaves the other card stuck on "Loading scores…" forever.
+  await Promise.all(Array.prototype.map.call(cards, async function (card) {
+    try {
+      await loadTeamCard(card, pastGamesShown);
+    } catch (e) {
+      const body = card.querySelector(".score-body");
+      body.innerHTML = "";
+      const note = document.createElement("div");
+      note.className = "score-empty";
+      note.textContent = "Scores unavailable right now.";
+      body.appendChild(note);
+    }
+  }));
+
+  // The stamp says when the BROWSER fetched, which on this design is a truer answer than
+  // the old build-time stamp: these numbers are as new as the moment you are reading them.
+  if (stamp) {
+    stamp.textContent = "As of " + pacificClock(new Date()) + " · refreshes when you reload";
+  }
 }
 
 // ==================================================================
@@ -723,6 +1150,10 @@ window.addEventListener("DOMContentLoaded", function () {
   applyDismissed();
   renderWatchLater();
   applyDismissedNews();
+  // The score cards arrive empty from Python and are filled in from ESPN here. Not
+  // awaited: the rest of the page must not sit waiting on a network call, and the cards
+  // say "Loading scores…" until it lands.
+  refreshScores();
 });
 
 // ==================================================================

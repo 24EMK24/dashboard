@@ -90,6 +90,75 @@ CACHE_DIR = "cache"   # folder where cached responses are saved (already gitigno
 CACHE_MAX_AGE = 900
 
 
+# ---------------------------------------------------------------------------
+# Fetching a lot of feeds without waiting for each one in turn
+# ---------------------------------------------------------------------------
+# WHY THIS EXISTS (measured 2026-09-01). A typical cloud build took 147 seconds, of which
+# python main.py was about 111 — and roughly 87 of those 111 seconds were spent doing
+# NOTHING but waiting. The YouTube and news panels asked for one feed, slept 2.5 seconds,
+# asked for the next, slept again: 25 channels plus 10 news subjects is about 87 seconds of
+# deliberate pauses, more than three quarters of the whole build.
+#
+# Those pauses were added back when the dashboard was built on Eli's laptop, where YouTube
+# and Google really were throttling his home connection. They were never re-examined after
+# the build moved to GitHub's machines. Rather than simply deleting them and hoping, this
+# asks for several feeds AT THE SAME TIME instead of one after another — the same total
+# number of requests, spread over far less wall-clock time.
+#
+# A "thread" is a second line of work running alongside the first, so the program can wait
+# on several replies at once instead of one at a time. ThreadPoolExecutor is Python's
+# ready-made way to do that: it keeps a small pool of workers and hands them jobs. Threads
+# suit this job specifically because the work is almost entirely WAITING for a web reply,
+# not calculating — while one thread waits, the others get on with it.
+from concurrent.futures import ThreadPoolExecutor
+
+# How many feeds to have in flight at once.
+#
+# This number is a compromise, not an optimum. Higher finishes sooner but looks more like a
+# burst, which is exactly what gets a shared IP throttled — and GitHub's runner IPs are
+# shared with an enormous number of other people. Six turns 25 channels into about five
+# rounds instead of 25, which recovers most of the 87 seconds while still being far gentler
+# than asking for all 25 at once.
+#
+# IMPORTANT: this is a speed change, NOT a removal of the safety nets. Both panels still do
+# a second pass over whatever came back empty, and still carry a channel's or subject's
+# last-known items forward when it stays empty. If throttling does get worse, those nets
+# catch it — and the honest fix is to lower this number, not to reach for anything cleverer.
+FETCH_WORKERS = 6
+
+
+def fetch_in_parallel(items, fetch_one):
+    # Run fetch_one(item) for every item, several at a time, and return the results as a
+    # list lined up with the items you passed in — results[3] is the answer for items[3].
+    #
+    # Keeping the original ORDER matters here: the news panel shows subjects in the order
+    # Eli listed them in config.json, and replies do not come back in the order they were
+    # asked for. So each job remembers its own position and writes its answer into that
+    # slot, rather than results being appended as they arrive.
+    #
+    # A job that raises leaves None in its slot instead of bringing the whole build down.
+    # That is the same fail-soft habit the panels already follow, and both callers already
+    # treat "nothing came back" as a channel to retry rather than as an error.
+    results = [None] * len(items)
+
+    # "with" closes the pool at the end, which also waits for every job to finish.
+    with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as pool:
+        # submit() starts a job and hands back a "future" — a receipt you can later ask
+        # for the answer. We keep a note of which position each receipt belongs to.
+        jobs = {}
+        for position, item in enumerate(items):
+            jobs[pool.submit(fetch_one, item)] = position
+
+        for job in jobs:
+            position = jobs[job]
+            try:
+                results[position] = job.result()
+            except Exception:
+                results[position] = None
+
+    return results
+
+
 def force_refresh_requested():
     # True when the build was told to ignore the cache and re-fetch everything.
     #
