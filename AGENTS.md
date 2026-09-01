@@ -69,10 +69,12 @@ or credentials without explicit instruction.
 - **Git identity is set repo-locally** to `24EMK24` /
   `98726549+24EMK24@users.noreply.github.com` so Eli's real email never lands in the public
   commit history. Do not change it to a personal address.
-- **Claude cannot `git push`** — this shell has prompts disabled
-  (`fatal: Cannot prompt because user interactivity has been disabled`). Git Credential
-  Manager is installed system-wide, so **ask Eli to run `git push` in his own terminal.**
-  Claude CAN commit; the split is commit here, push there.
+- **Claude CAN `git push` (corrected 2026-09-01).** It worked: `git push origin main`
+  pushed `2b983e0` cleanly and started cloud run #942. Earlier sessions recorded that it
+  was impossible (`fatal: Cannot prompt because user interactivity has been disabled`) and
+  that Eli had to push himself — that is no longer true; Git Credential Manager answers
+  without a prompt. If it ever fails with that message again, fall back to asking Eli to
+  run it in his own terminal, but **try it first rather than assuming.**
 - **Write multi-line commit messages to a file and use `git commit -F <file>`.** Do not pass
   them with `-m`. A PowerShell here-string (`@'…'@`) in the PowerShell tool gets re-parsed
   and git reads the fragments as pathspecs (`error: pathspec 'unavailable' did not match any
