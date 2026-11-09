@@ -31,7 +31,7 @@
     { "name": "Greg Doucette",       "channel_id": "UCLqH-U2TXzj1h7lyYQZLNQQ" },
     { "name": "Internet Anarchist",  "channel_id": "UC_iUeUzozCHEReJ-shKcCYA" }
   ],
-  "youtube_relay": "",
+  "youtube_relay": "https://yt-relay.24emk24.workers.dev",
   "sports_teams": [
     { "name": "Mariners", "sport": "baseball", "league": "mlb", "team": "sea" },
     { "name": "Seahawks", "sport": "football", "league": "nfl", "team": "sea" }
