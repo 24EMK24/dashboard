@@ -54,25 +54,36 @@ function textReply(message, status) {
 
 // Fetch one address and pass the answer back with the permission header attached.
 // Shared by all three kinds of request, so they behave identically.
-async function relay(targetUrl, contentType, maxAgeSeconds) {
-  let reply;
-  try {
-    // The "cf" part asks Cloudflare to keep a copy and reuse it for a while, so many page
-    // loads cost the real site only one request. (If Cloudflare declines to keep it,
-    // everything still works — just with more asking.)
-    reply = await fetch(targetUrl, {
-      headers: { "User-Agent": USER_AGENT },
-      cf: { cacheTtl: maxAgeSeconds, cacheEverything: true },
-    });
-  } catch (error) {
-    // The site could not be reached at all (502 = "the thing behind me failed").
-    return textReply("Could not reach the site: " + error, 502);
+//
+// `attempts` is how many times to ask before giving up. Google News refuses MANY of
+// Cloudflare's machines with a 503 but not all of them (measured 2026-11-09: the same
+// request failed, then worked, then failed again over three minutes, while the laptop got
+// through every time). Each new attempt can go out from a different machine, so trying
+// again straight away is a real chance, not just repetition.
+async function relay(targetUrl, contentType, maxAgeSeconds, attempts) {
+  let reply = null;
+  let lastError = "";
+  for (let attempt = 1; attempt <= (attempts || 1); attempt++) {
+    try {
+      // The "cf" part asks Cloudflare to keep a copy and reuse it for a while, so many
+      // page loads cost the real site only one request. (If Cloudflare declines to keep
+      // it, everything still works — just with more asking.)
+      reply = await fetch(targetUrl, {
+        headers: { "User-Agent": USER_AGENT },
+        cf: { cacheTtl: maxAgeSeconds, cacheEverything: true },
+      });
+      if (reply.ok) break;                    // got it — stop trying
+      lastError = "The site answered " + reply.status;
+    } catch (error) {
+      reply = null;
+      lastError = "Could not reach the site: " + error;
+    }
   }
 
-  // The site answered, but with an error (throttled, or the thing is gone). Pass the
-  // status along in words so the page — and anyone debugging — can see what happened.
-  if (!reply.ok) {
-    return textReply("The site answered " + reply.status, 502);
+  // Every attempt failed: the site could not be reached, or kept refusing.
+  // (502 = "the thing behind me failed".)
+  if (!reply || !reply.ok) {
+    return textReply(lastError, 502);
   }
 
   // Success: hand back the text with the permission header attached.
@@ -114,7 +125,8 @@ export default {
       const address = query === ""
         ? "https://news.google.com/rss?" + tail
         : "https://news.google.com/rss/search?q=" + encodeURIComponent(query) + "&" + tail;
-      return relay(address, "text/xml; charset=UTF-8", FEED_MAX_AGE_SECONDS);
+      // Up to 4 tries — see the note on relay() about Google refusing some machines.
+      return relay(address, "text/xml; charset=UTF-8", FEED_MAX_AGE_SECONDS, 4);
     }
 
     // 3. A stock or index's price chart from Yahoo. "1d" = today, a reading every 15
