@@ -91,7 +91,10 @@ or credentials without explicit instruction.
   relative paths like `config.json` and `cache/`). Writes `dashboard.html`. Direct call
   without activating the venv: `.\.venv\Scripts\python.exe main.py`. This is now only for
   **testing a change before pushing** — it no longer produces the page Eli actually looks at.
-- **Publish a change (the real workflow now):** edit → commit → **`git push`** (Eli runs it).
+- **Publish a change (the real workflow now):** edit → commit → **`git push`** (Claude can run it).
+  **A change to `relay/worker.js` is published differently:** Eli pastes the file into the
+  Cloudflare dashboard (Workers → yt-relay → Edit code → Deploy). Pushing it does nothing to
+  the running relay. Re-test the deployed relay after every paste.
   The `push` trigger rebuilds and republishes within a couple of minutes. **Editing
   `config.json` or a panel locally changes nothing anyone sees until it is pushed.**
 - **Force a rebuild without a code change:** repo → **Actions** tab → "Build dashboard" →
@@ -103,15 +106,13 @@ or credentials without explicit instruction.
 - **Check whether the cloud build is healthy:** the Actions tab shows every run. The public
   API also works without auth, e.g.
   `https://api.github.com/repos/24EMK24/dashboard/actions/runs?per_page=5`.
-- **Since 2026-11-09 it also refreshes YouTube videos — but ONLY when `youtube_relay` is set
-  in `config.json`**, and `refreshLabel()` only says "videos" in that case.
-- **The Refresh button refreshes WEATHER AND SCORES** (scores added
-  2026-09-01). Those are the only two things the browser can fetch for itself; stocks,
-  YouTube and news are baked into the file by Python and can only change on a rebuild. Eli
-  raised this himself — the button "only refreshes the weather" — so **the label now names
-  what it really does** rather than saying a bare "Refresh". Do not relabel it back, and do
-  not wire stocks/YouTube/news into it: those feeds have no CORS permission for a browser
-  and the request would simply be refused.
+- **The Refresh button says "Refresh everything" and means it (since 2026-11-09)** — weather,
+  scores, candle lighting, and (through the relay) YouTube, news and stocks. **Only when
+  `youtube_relay` is set in `config.json`**; without it `refreshLabel()` falls back to
+  "Refresh weather & scores", which is all the browser can then fetch. History: Eli said the
+  old bare button "only refreshes the weather", which is why the label always names what it
+  really does. YouTube/news/stocks have no CORS permission of their own — they only reach
+  the browser through the relay.
 - **Open `dashboard.html` in a real browser (Chrome/Edge), NOT VS Code's Simple Browser** —
   the Simple Browser has no DevTools console and doesn't persist `localStorage`, so
   delete/Watch-Later won't stick. `Start-Process dashboard.html` opens the OS default browser.
@@ -330,7 +331,11 @@ Split into a **`panels/` package** (done at panel three, 2026-07-22). Layout:
   three request shapes — `?channel_id=UC…`, `?news=<query>` (empty = top stories) and
   `?stock=<symbol>&range=1d|5d` — and refuses anything else. **Eli's Cloudflare account; the
   subdomain was renamed from his Gmail name to `24emk24` because the address is public.** A
-  new `workers.dev` subdomain refuses TLS for a few minutes while its certificate is issued. It runs on **Cloudflare, not GitHub** — editing the file
+  new `workers.dev` subdomain refuses TLS for a few minutes while its certificate is issued.
+  **GOOGLE NEWS REFUSES MOST CLOUDFLARE EGRESS (503)** — measured 2026-11-09: ~1 subject in
+  10 gets through even with the 4-attempt retry `?news=` uses, and each failure costs 7–37 s.
+  YouTube and Yahoo work fine through it. So live news mostly falls back to the build; a
+  decision on another source or reverting is open (see `.planning/`). It runs on **Cloudflare, not GitHub** — editing the file
   here changes nothing until it is pasted into the Cloudflare dashboard again. Its address
   goes in `config.json` as **`youtube_relay`** (empty = no relay; the page then shows only the
   build's cards and the Refresh button does not mention videos). Why: the build step measured
@@ -515,6 +520,7 @@ TBD — will be filled in as commands, routes, or user-facing operations are imp
 | --- | --- |
 | **v1** | Weather + stocks + YouTube + news panels, generated as a local `dashboard.html` opened on the laptop. **COMPLETE as of 2026-07-23.** |
 | **v2** | Reachable from Eli's phone, not dependent on Windows. **COMPLETE as of 2026-07-26** — GitHub Actions rebuilds on a schedule and publishes to GitHub Pages at **https://24emk24.github.io/dashboard/**. First cloud build passed on the first attempt; phone confirmed by Eli; laptop updater retired the same day. Refresh cadence was found to be far worse than the cron claimed and was reworked on 2026-07-27 (see the workflow notes above). |
+| **Live page** | **2026-11-09.** YouTube, news and stocks fetched by the browser through a Cloudflare Worker relay; candle lighting from Hebcal; score cards only when a game is soon; Watch Later removed. Eli's request ("some creative way… without having to rebuild"), approved as an architecture change. Adds one free account (Cloudflare) and no server or database — the relay holds no state. The build remains as the fallback. |
 | **Score keeper** | Mariners + Seahawks scores at the top of the page. **Rebuilt 2026-09-01 to fetch in the BROWSER** (past 3 games + division standing; `panels/scores.py` now emits only shells). **Added 2026-07-28 on Eli's direct request**, outside the v1/v2/v3 tiers — it is not scope creep and it is not a v3 feature. Needs no key, no account and no new dependency (`requests` was already pinned), so it did not pull the project toward the server/database complexity v3 is holding back. |
 | **v3** | Price-drop alerts, notifications, and/or true cross-device state sync. The genuinely hard, optional tier. **Not started — do not begin any of it unprompted.** Note that `localStorage` (deletions, Watch Later) is per-browser AND per-origin, so laptop and phone each keep their own; real sync needs a backend, which the project has deliberately avoided so far. |
 
