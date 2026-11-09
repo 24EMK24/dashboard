@@ -26,7 +26,10 @@
     { "name": "Tom Grossi",          "channel_id": "UCg6jOxpPC46mnBs9NsgLcvg" },
     { "name": "big boss",            "channel_id": "UCYGDiVemmhY_Q1M-hKp4fvw" },
     { "name": "Reckless Ben",        "channel_id": "UC_UE7maDDe8OqqC8-TtXaKg" },
-    { "name": "PointlessHub",        "channel_id": "UCKNbAYjhxVS5Y8p3FhhUxoA" }
+    { "name": "PointlessHub",        "channel_id": "UCKNbAYjhxVS5Y8p3FhhUxoA" },
+    { "name": "Tectone",             "channel_id": "UCPnSoX7NkOBcOX0Gfw_yjAw" },
+    { "name": "Greg Doucette",       "channel_id": "UCLqH-U2TXzj1h7lyYQZLNQQ" },
+    { "name": "Internet Anarchist",  "channel_id": "UC_iUeUzozCHEReJ-shKcCYA" }
   ],
   "sports_teams": [
     { "name": "Mariners", "sport": "baseball", "league": "mlb", "team": "sea" },
