@@ -289,8 +289,9 @@ __WEATHER_BODY__
 __STOCKS__
 </section>
 
-<!-- "New Today": today's YouTube uploads. Python fills in the video cards; the
-     JavaScript below makes the ✕ and "+ Watch later" buttons work. -->
+<!-- "New Videos": the last 3 days of YouTube uploads. Python fills in the video cards from
+     the last build; the JavaScript below merges in newer ones live through the Cloudflare
+     relay, and makes the ✕ and "+ Watch later" buttons work. -->
 <section class="panel youtube">
 __YOUTUBE__
 </section>
@@ -420,25 +421,33 @@ async function refreshWeather() {
 }
 
 // The Refresh button. It refreshes every widget that CAN update live in the browser:
-// weather, and — since 2026-09-01 — the score cards too.
+// weather, the score cards (since 2026-09-01), and YouTube videos (since 2026-11-09, but
+// ONLY once the Cloudflare relay's address is in config.json).
 //
-// WHY IT SAYS "Refresh weather &amp; scores" RATHER THAN JUST "Refresh": Eli's own words
+// WHY IT NAMES WHAT IT REFRESHES RATHER THAN JUST SAYING "Refresh": Eli's own words
 // were that the button was "kind of stupid because to my knowledge it only refreshes the
-// weather", and he was exactly right. Stocks, YouTube and news are baked into the page by
-// Python when the file is built, so nothing the browser does can update them — the only
-// way to refresh those is a rebuild, which is what the "Run a rebuild" link in the
-// freshness strip is for. A button labelled just "Refresh" quietly promises more than it
-// can deliver, so it now names the two things it genuinely does.
-//
-// The two fetches are started TOGETHER with Promise.all rather than one after the other,
-// so pressing the button costs about as long as the slower of the two instead of the sum.
+// weather", and he was exactly right. Stocks and news are baked into the page by Python
+// when the file is built, so nothing the browser does can update them — the only way to
+// refresh those is a rebuild, which is what the "Run a rebuild" link in the freshness
+// strip is for. A button labelled just "Refresh" quietly promises more than it can
+// deliver, so it names the things it genuinely does — and refreshLabel() only adds
+// "videos" when the relay is actually set up.
+function refreshLabel() {
+  const box = document.getElementById("yt-live-config");
+  const hasRelay = !!(box && box.dataset.relay);
+  return hasRelay ? "Refresh weather, scores &amp; videos &#8635;"
+                  : "Refresh weather &amp; scores &#8635;";
+}
+
+// The fetches are started TOGETHER with Promise.all rather than one after the other, so
+// pressing the button costs about as long as the slowest one instead of the sum.
 async function refreshAll() {
   const btn = document.getElementById("refresh-btn");
   btn.disabled = true;
   btn.innerHTML = "Refreshing…";
-  await Promise.all([refreshWeather(), refreshScores()]);
+  await Promise.all([refreshWeather(), refreshScores(), refreshYouTube()]);
   btn.disabled = false;
-  btn.innerHTML = "Refresh weather &amp; scores &#8635;";
+  btn.innerHTML = refreshLabel();
 }
 
 // ==================================================================
@@ -851,14 +860,18 @@ async function refreshScores() {
 // A static HTML file has no server to remember things between runs, so we use the
 // browser's built-in localStorage — a small per-browser box that survives page
 // reloads. We keep two things in it:
-//   * which of today's videos Eli has dismissed (so a ✕ sticks for the rest of today)
+//   * which videos Eli has ✕'d (so a ✕ sticks — since 2026-11-09, for good, not just
+//     for the rest of the day)
 //   * his "Watch Later" list (which survives across days until he removes an item)
 // ==================================================================
 
-// The names we store our two things under. The "_v1" suffix lets us change the shape
+// The names we store our things under. The "_v1"/"_v2" suffix lets us change the shape
 // later without clashing with old saved data.
 const LATER_KEY = "yt_watch_later_v1";
-const DISMISS_KEY = "yt_dismissed_v1";
+// v2 (2026-11-09): { videoId: when it was ✕'d, in ms }. v1 was { "2026-11-09": [ids] },
+// which forgot everything at midnight. See getDismissed() for how v1 is carried over.
+const DISMISS_KEY = "yt_dismissed_v2";
+const OLD_DISMISS_KEY = "yt_dismissed_v1";
 
 // Today's date as "YYYY-MM-DD" in Pacific — matches the date the Python side used to
 // pick today's videos. "en-CA" happens to format dates as YYYY-MM-DD; timeZone pins
@@ -881,30 +894,55 @@ function loadJSON(key, fallback) {
 function loadLater() { return loadJSON(LATER_KEY, []); }          // array of video objects
 function saveLater(items) { localStorage.setItem(LATER_KEY, JSON.stringify(items)); }
 
-// --- Dismissed-today storage ---
-// The list of video ids Eli dismissed today. We store it under today's date only.
-function getDismissedToday() {
-  const all = loadJSON(DISMISS_KEY, {});
-  return all[todayStr()] || [];
-}
-function setDismissedToday(ids) {
-  // Store ONLY today's dismissals, throwing away any other date. That is what makes a
-  // new day a clean slate: yesterday's "removed" videos are simply forgotten.
-  const obj = {};
-  obj[todayStr()] = ids;
-  localStorage.setItem(DISMISS_KEY, JSON.stringify(obj));
+// --- Dismissed-video storage ---
+// How long the list may reach back, in hours. Python hands this over (RECENT_HOURS in
+// panels/youtube.py) so the two can never disagree; 72 is only a fallback.
+function windowHours() {
+  const box = document.getElementById("yt-live-config");
+  return (box && Number(box.dataset.windowHours)) || 72;
 }
 
-// Dismiss one of today's videos, given the CARD itself: hide it and remember it for the
-// rest of today. Split out from dismissToday below so the "clear it when you click it"
-// handler can reuse it — that one starts from a link, not from the ✕ button.
+// Every video Eli has ✕'d, as { videoId: whenDismissedMs }.
+function getDismissed() {
+  const dismissed = loadJSON(DISMISS_KEY, {});
+  // One-time carry-over from the old day-keyed list, so the switch to v2 does not bring
+  // back today's already-✕'d videos. Read it, copy its ids across, then delete it.
+  const old = loadJSON(OLD_DISMISS_KEY, null);
+  if (old) {
+    Object.keys(old).forEach(function (day) {
+      (old[day] || []).forEach(function (vid) {
+        if (!dismissed[vid]) dismissed[vid] = Date.now();
+      });
+    });
+    try { localStorage.removeItem(OLD_DISMISS_KEY); } catch (e) {}
+    setDismissed(dismissed);
+  }
+  return dismissed;
+}
+
+function setDismissed(dismissed) {
+  // Forget a dismissal once its video is certainly too old to be shown anyway: it was
+  // ✕'d after it was published, so once the ✕ is older than the window (plus a day of
+  // slack) the video is too. Without this the list would grow for ever.
+  const forgetBefore = Date.now() - (windowHours() + 24) * 3600 * 1000;
+  const kept = {};
+  Object.keys(dismissed).forEach(function (vid) {
+    if (dismissed[vid] >= forgetBefore) kept[vid] = dismissed[vid];
+  });
+  try { localStorage.setItem(DISMISS_KEY, JSON.stringify(kept)); } catch (e) {}
+}
+
+// Dismiss one video, given the CARD itself: hide it and remember it. Split out from
+// dismissToday below so the "clear it when you click it" handler can reuse it — that one
+// starts from a link, not from the ✕ button. (The names still say "Today" because the
+// list used to be "New Today"; renaming them would touch every caller for no gain.)
 function dismissTodayCard(card) {
   if (!card) return;
   const vid = card.dataset.vid;           // its video id (from the data-vid attribute)
-  const ids = getDismissedToday();
-  if (!ids.includes(vid)) {
-    ids.push(vid);
-    setDismissedToday(ids);
+  const dismissed = getDismissed();
+  if (!dismissed[vid]) {
+    dismissed[vid] = Date.now();
+    setDismissed(dismissed);
   }
   card.remove();          // take it off the page now
   updateTodayEmpty();     // maybe show the "all caught up" note
@@ -927,9 +965,8 @@ function clearOnOpen(el) {
   const card = el.closest(".yt-card");
   if (!card) return;
   const vid = card.dataset.vid;
-  // Which of the two lists is this card in? They forget things differently: a "New Today"
-  // dismissal lasts for the rest of today, while Watch Later is a list built on purpose,
-  // so opening something there removes it for good.
+  // Which of the two lists is this card in? Opening a "New Videos" card dismisses it like
+  // a ✕; opening a Watch Later card takes it off that list.
   const inWatchLater = !!card.closest("#watch-later-list");
   setTimeout(function () {
     if (inWatchLater) {
@@ -958,8 +995,8 @@ function saveForLater(btn) {
     saveLater(items);
     renderWatchLater();
   }
-  // Saving also removes the video from "New Today" (and remembers that for the rest of
-  // today, so it doesn't come back on reload) — the same effect as pressing ✕.
+  // Saving also removes the video from "New Videos" (and remembers that, so it doesn't
+  // come back on reload) — the same effect as pressing ✕.
   dismissToday(btn);
 }
 
@@ -1028,15 +1065,191 @@ function renderWatchLater() {
   }
 }
 
-// On page load, hide any of today's videos Eli already dismissed today.
+// On page load, hide any videos Eli already ✕'d, and any that have aged out of the window
+// since the build drew them (a page built 2 days ago may hold cards older than 3 days now).
 function applyDismissed() {
-  const ids = getDismissedToday();
+  const dismissed = getDismissed();
   const list = document.getElementById("yt-today-list");
   if (!list) return;
+  const cutoff = Date.now() / 1000 - windowHours() * 3600;
   for (const card of list.querySelectorAll(".yt-card")) {
-    if (ids.includes(card.dataset.vid)) card.remove();
+    const published = Number(card.dataset.published);
+    if (dismissed[card.dataset.vid] || (published && published < cutoff)) card.remove();
   }
   updateTodayEmpty();
+}
+
+// ==================================================================
+// Live YouTube, through the Cloudflare relay (added 2026-11-09)
+// ------------------------------------------------------------------
+// The cards Python drew are only as new as the last build, and the evening builds are
+// slow and miss channels because YouTube throttles GitHub's shared machines. So, as soon
+// as the page opens (and whenever Refresh is pressed), we ask YouTube again from HERE.
+//
+// A browser is not allowed to read YouTube's feed directly — YouTube does not send the
+// permission header — so each request goes to our relay (relay/worker.js, on Cloudflare),
+// which fetches the feed and passes it back with that permission added.
+//
+// Nothing is lost if the relay is down or a channel fails: we MERGE the live videos into
+// the build's cards rather than replacing them, so a channel the relay could not reach
+// simply keeps what the build had for it.
+
+// Draw one "New Videos" card. Built from real elements with textContent (never innerHTML)
+// for the title and channel, so a video title can never inject HTML. The shape — classes,
+// data-* attributes, buttons — matches the cards panels/youtube.py writes exactly, so the
+// ✕, "+ Watch later" and click-to-clear work the same on both.
+function buildNewVideoCard(v) {
+  const card = document.createElement("div");
+  card.className = "yt-card";
+  card.dataset.vid = v.video_id;
+  card.dataset.title = v.title;
+  card.dataset.url = v.url;
+  card.dataset.thumb = v.thumbnail;
+  card.dataset.channel = v.channel;
+  card.dataset.published = String(v.published_epoch);
+
+  const thumbLink = document.createElement("a");
+  thumbLink.className = "yt-thumb-link";
+  thumbLink.href = v.url; thumbLink.target = "_blank"; thumbLink.rel = "noopener";
+  thumbLink.onclick = function () { clearOnOpen(this); };
+  const img = document.createElement("img");
+  img.className = "yt-thumb"; img.src = v.thumbnail; img.alt = ""; img.loading = "lazy";
+  thumbLink.appendChild(img);
+
+  const meta = document.createElement("div");
+  meta.className = "yt-meta";
+  const title = document.createElement("a");
+  title.className = "yt-title";
+  title.href = v.url; title.target = "_blank"; title.rel = "noopener";
+  title.onclick = function () { clearOnOpen(this); };
+  title.textContent = v.title;
+  const chan = document.createElement("div");
+  chan.className = "yt-channel";
+  chan.textContent = v.channel;
+
+  const actions = document.createElement("div");
+  actions.className = "yt-actions";
+  const save = document.createElement("button");
+  save.className = "yt-save";
+  save.textContent = "+ Watch later";
+  save.onclick = function () { saveForLater(this); };
+  const remove = document.createElement("button");
+  remove.className = "yt-remove"; remove.title = "Remove";
+  remove.innerHTML = "&#10005;";
+  remove.onclick = function () { dismissToday(this); };
+  actions.appendChild(save);
+  actions.appendChild(remove);
+
+  meta.appendChild(title);
+  meta.appendChild(chan);
+  meta.appendChild(actions);
+  card.appendChild(thumbLink);
+  card.appendChild(meta);
+  return card;
+}
+
+// Read the video details back off a card (the build's or ours) into a plain object.
+function videoFromCard(card) {
+  return {
+    video_id: card.dataset.vid,
+    title: card.dataset.title,
+    url: card.dataset.url,
+    thumbnail: card.dataset.thumb,
+    channel: card.dataset.channel,
+    published_epoch: Number(card.dataset.published) || 0
+  };
+}
+
+// Ask the relay for ONE channel's feed and turn its XML into video objects shaped like
+// the ones Python saves (see entry_to_video in panels/youtube.py). Throws on failure, so
+// the caller can count which channels answered.
+async function fetchChannelLive(relay, channel) {
+  // Strip any trailing "/" from the address in config.json so either spelling works.
+  const address = relay.replace(/\/+$/, "") + "/?channel_id=" + encodeURIComponent(channel.channel_id);
+  const reply = await fetch(address);
+  if (!reply.ok) throw new Error("relay answered " + reply.status);
+  // DOMParser is the browser's built-in XML reader — the JavaScript cousin of feedparser.
+  const xml = new DOMParser().parseFromString(await reply.text(), "text/xml");
+  const videos = [];
+  for (const entry of xml.getElementsByTagName("entry")) {
+    // "yt:videoId" is the feed's own name for the video id field.
+    const idEl = entry.getElementsByTagName("yt:videoId")[0];
+    const publishedEl = entry.getElementsByTagName("published")[0];
+    if (!idEl || !publishedEl) continue;          // skip anything missing an id or a date
+    const vid = idEl.textContent.trim();
+    const titleEl = entry.getElementsByTagName("title")[0];
+    const linkEl = entry.getElementsByTagName("link")[0];
+    videos.push({
+      video_id: vid,
+      title: titleEl ? titleEl.textContent : "(untitled)",
+      url: (linkEl && linkEl.getAttribute("href")) || "https://www.youtube.com/watch?v=" + vid,
+      thumbnail: "https://i.ytimg.com/vi/" + vid + "/hqdefault.jpg",
+      channel: channel.name,
+      // Date.parse reads the feed's "2026-11-09T20:00:37+00:00"; /1000 makes it seconds,
+      // the same unit Python uses.
+      published_epoch: Math.floor(Date.parse(publishedEl.textContent) / 1000)
+    });
+  }
+  return videos;
+}
+
+// Fetch every channel live, merge with what is on the page, and redraw the list.
+async function refreshYouTube() {
+  const configBox = document.getElementById("yt-live-config");
+  const list = document.getElementById("yt-today-list");
+  const stamp = document.getElementById("yt-stamp");
+  if (!configBox || !list) return;            // the panel failed soft — nothing to do
+  const relay = configBox.dataset.relay;
+  if (!relay) return;                         // no relay set up yet: build's cards only
+  const channels = JSON.parse(configBox.dataset.channels || "[]");
+
+  if (stamp) stamp.textContent = "Checking YouTube…";
+
+  // Ask for every channel at once. A channel that fails gives null instead of stopping
+  // the others (that is what the .catch does).
+  const answers = await Promise.all(channels.map(function (channel) {
+    return fetchChannelLive(relay, channel).catch(function () { return null; });
+  }));
+
+  // Start from the cards already on the page, then add the live videos. Keyed by video
+  // id, so a video in both just appears once.
+  const byId = {};
+  list.querySelectorAll(".yt-card").forEach(function (card) {
+    byId[card.dataset.vid] = videoFromCard(card);
+  });
+  let answered = 0;
+  answers.forEach(function (videos) {
+    if (videos === null) return;
+    answered += 1;
+    videos.forEach(function (v) { byId[v.video_id] = v; });
+  });
+
+  // Keep only videos inside the window that Eli has not ✕'d, newest first.
+  const dismissed = getDismissed();
+  const cutoff = Date.now() / 1000 - windowHours() * 3600;
+  const shown = Object.keys(byId).map(function (vid) { return byId[vid]; })
+    .filter(function (v) { return v.published_epoch >= cutoff && !dismissed[v.video_id]; })
+    .sort(function (a, b) { return b.published_epoch - a.published_epoch; });
+
+  // Redraw, keeping the scroll position so a refresh does not throw you back to the top.
+  const scrolledTo = list.scrollTop;
+  list.innerHTML = "";
+  shown.forEach(function (v) { list.appendChild(buildNewVideoCard(v)); });
+  list.scrollTop = scrolledTo;
+  updateTodayEmpty();
+
+  // Say honestly how the check went.
+  if (stamp) {
+    const when = pacificClock(new Date());
+    if (answered === channels.length) {
+      stamp.textContent = "Live · checked " + when + " · all " + channels.length + " channels";
+    } else if (answered > 0) {
+      stamp.textContent = "Live · checked " + when + " · " + answered + " of " + channels.length
+                        + " channels answered (the rest from the last build)";
+    } else {
+      stamp.textContent = "Couldn't reach YouTube at " + when + " · showing the last build's videos";
+    }
+  }
 }
 
 // Show an "all caught up" note if the New Today list has no visible cards left.
@@ -1051,7 +1264,7 @@ function updateTodayEmpty() {
       note.className = "yt-empty";
       list.appendChild(note);
     }
-    note.textContent = "All caught up for today.";
+    note.textContent = "All caught up.";
   } else if (note) {
     note.remove();
   }
@@ -1154,6 +1367,10 @@ window.addEventListener("DOMContentLoaded", function () {
   // awaited: the rest of the page must not sit waiting on a network call, and the cards
   // say "Loading scores…" until it lands.
   refreshScores();
+  // Same idea for YouTube: the build's cards show at once, and newer ones are merged in
+  // from the relay when they arrive. Not awaited, for the same reason.
+  document.getElementById("refresh-btn").innerHTML = refreshLabel();
+  refreshYouTube();
 });
 
 // ==================================================================

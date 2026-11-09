@@ -1,12 +1,17 @@
 # panels/youtube.py
 # The YouTube panel: for each channel in config.json, read its public RSS feed and show
-# the videos released TODAY (Pacific time), newest first, each as a thumbnail + title
-# that links to the video. Fetches all feeds THROUGH the shared cache so repeated runs
-# don't re-hit YouTube. Fail soft: any breakage returns a short "unavailable" message.
+# the videos released in the last RECENT_HOURS (3 days), newest first, each as a
+# thumbnail + title that links to the video. Fetches all feeds THROUGH the shared cache so
+# repeated runs don't re-hit YouTube. Fail soft: any breakage returns a short "unavailable"
+# message.
+#
+# SINCE 2026-11-09 THESE CARDS ARE THE BACKUP, NOT THE MAIN SOURCE. When a relay address
+# is set in config.json, the page asks YouTube again (through relay/worker.js on
+# Cloudflare) every time it is opened and merges in anything newer. The build's cards are
+# what you see if the relay is down, and they fill in any channel the relay misses.
 #
 # What this panel does NOT do here (it happens in the browser, in template.html's
-# <script>): the ✕ delete button, the "clean slate on a new day" reset, and the whole
-# "Watch Later" list. Those need to remember your choices between runs, and a static
+# <script>): the live fetch, the ✕ delete button, and the whole "Watch Later" list. Those need to remember your choices between runs, and a static
 # HTML file has no server to store them — so they live in the browser's localStorage.
 # Python's job is only to lay out today's videos; JavaScript makes them interactive.
 
@@ -36,8 +41,16 @@ from zoneinfo import ZoneInfo
 # folder get_cached writes to; we read cache/youtube.json from it to carry channels over.
 from panels.common import (
     YOUTUBE_CHANNELS, get_cached, cached_time_label, CACHE_DIR, CACHE_MAX_AGE,
-    fetch_in_parallel,
+    fetch_in_parallel, YOUTUBE_RELAY,
 )
+
+# How far back the "New Videos" list reaches, in hours (changed 2026-11-09). It used to be
+# "today, Pacific" with a clean slate at midnight; Eli asked for that to stop — he ✕'s
+# every video himself, so the midnight wipe only ever cost him late-night uploads the page
+# had not caught yet. A video now stays until he ✕'s it or it is older than this.
+# The browser uses the SAME number (it is handed over in data-window-hours below), so the
+# list the build draws and the list the page fetches live can never disagree.
+RECENT_HOURS = 72
 
 # YouTube publishes one RSS feed per channel at this address; we fill in the channel id.
 FEED_URL = "https://www.youtube.com/feeds/videos.xml?channel_id="
@@ -185,7 +198,7 @@ def fetch_youtube_data():
             if not got_this_channel:
                 # Still throttled after two tries: keep whatever this channel had last
                 # run so its videos don't disappear. The render step still hides any
-                # video not published today, so genuinely old ones drop off on their own.
+                # video older than RECENT_HOURS, so genuinely old ones drop off on their own.
                 videos.extend(previous.get(channel["name"], []))
             time.sleep(CHANNEL_GAP_SECONDS)
 
@@ -197,35 +210,48 @@ def build_youtube_panel():
         # All recent videos, THROUGH THE CACHE (re-fetched at most every ~15 minutes).
         videos = get_cached("youtube", fetch_youtube_data, CACHE_MAX_AGE)
 
-        # Today's date in Pacific, as "2026-07-22". A video counts as "today" if its
-        # own published time, converted to Pacific, falls on this same date.
-        today = datetime.now(PACIFIC).strftime("%Y-%m-%d")
-        todays = []
+        # Keep only videos published in the last RECENT_HOURS. time.time() is "now" as an
+        # epoch number, the same kind of number published_epoch is, so a plain subtraction
+        # works and no time zone is involved at all.
+        cutoff = time.time() - RECENT_HOURS * 3600
+        recent = []
+        seen_ids = set()          # carry-forward can repeat a video, so skip duplicates
         for v in videos:
-            when = datetime.fromtimestamp(v["published_epoch"], PACIFIC)
-            if when.strftime("%Y-%m-%d") == today:
-                todays.append(v)
+            if v["published_epoch"] >= cutoff and v["video_id"] not in seen_ids:
+                recent.append(v)
+                seen_ids.add(v["video_id"])
 
         # Newest first: sort by the epoch number, largest (most recent) at the top.
-        todays.sort(key=lambda v: v["published_epoch"], reverse=True)
+        recent.sort(key=lambda v: v["published_epoch"], reverse=True)
 
         pieces = []
-        pieces.append("<h2>New Today</h2>")
-        # Honest "as of" stamp, like the stocks panel — the browser can't refresh this
-        # (YouTube's feed can't be fetched from a page), so it updates when Python re-runs.
-        pieces.append('<p class="updated">As of ' + cached_time_label("youtube")
-                      + ' · re-run to refresh · new day = clean slate</p>')
+        pieces.append("<h2>New Videos</h2>")
+        # The stamp says where these cards came from. If the relay is set up, the page's
+        # JavaScript asks YouTube again the moment the page opens and REPLACES this line
+        # with "Live · checked <time>". The id lets the script find it.
+        pieces.append('<p class="updated" id="yt-stamp">From the build at '
+                      + cached_time_label("youtube") + ' · stays until you ✕ it</p>')
 
-        # The scroll box that holds today's video cards. JavaScript on page load hides
-        # any you've already dismissed today, and shows an "all caught up" note if the
-        # box ends up empty. The id lets the script find this box.
+        # Everything the browser needs to fetch the same channels live, through the relay:
+        # the relay's address, the channel list, and the window in hours. Python writes it
+        # as JSON into data-* attributes; the script reads it back with JSON.parse.
+        # html.escape(..., quote=True) keeps the JSON's own quotes from ending the attribute.
+        channels_json = json.dumps(YOUTUBE_CHANNELS)
+        pieces.append('<div id="yt-live-config" hidden'
+                      ' data-relay="' + html.escape(YOUTUBE_RELAY, quote=True) + '"'
+                      ' data-window-hours="' + str(RECENT_HOURS) + '"'
+                      ' data-channels="' + html.escape(channels_json, quote=True) + '"></div>')
+
+        # The scroll box that holds the video cards. JavaScript on page load hides any you
+        # have already ✕'d, adds any newer ones the relay finds, and shows an "all caught
+        # up" note if the box ends up empty. The id lets the script find this box.
         pieces.append('<div class="yt-list" id="yt-today-list">')
 
-        if not todays:
-            # Nothing released yet today (or no channels configured).
-            pieces.append('<p class="yt-empty">No new videos yet today.</p>')
+        if not recent:
+            # Nothing in the window (or no channels configured).
+            pieces.append('<p class="yt-empty">No new videos.</p>')
         else:
-            for v in todays:
+            for v in recent:
                 # Escape every piece of text before putting it in HTML/attributes, so a
                 # title with < > & or quotes can't break the page. quote=True also
                 # escapes the " and ' used around attribute values.
@@ -243,7 +269,10 @@ def build_youtube_panel():
                     ' data-title="' + title + '"'
                     ' data-url="' + url + '"'
                     ' data-thumb="' + thumb + '"'
-                    ' data-channel="' + channel + '">'
+                    ' data-channel="' + channel + '"'
+                    # When it was published (epoch seconds). The browser needs this to
+                    # merge these cards with live ones in the right order.
+                    ' data-published="' + str(v["published_epoch"]) + '">'
                 )
                 # Thumbnail + title both link to the video, opening in a new tab.
                 # onclick="clearOnOpen(this)" ALSO takes the card off the list once you
@@ -262,7 +291,7 @@ def build_youtube_panel():
                 # Save this card to Watch Later. onclick passes the card element (this)
                 # up to a JS function that reads the data-* attributes above.
                 pieces.append('<button class="yt-save" onclick="saveForLater(this)">+ Watch later</button>')
-                # Dismiss just this card for the rest of today.
+                # Dismiss just this card, for good (it does not come back at midnight).
                 pieces.append('<button class="yt-remove" onclick="dismissToday(this)" title="Remove">&#10005;</button>')
                 pieces.append('</div>')   # .yt-actions
                 pieces.append('</div>')   # .yt-meta
@@ -273,4 +302,4 @@ def build_youtube_panel():
 
     except Exception:
         # Fail soft: one broken panel must not blank the rest of the page.
-        return "<h2>New Today</h2><p>YouTube is unavailable right now.</p>"
+        return "<h2>New Videos</h2><p>YouTube is unavailable right now.</p>"

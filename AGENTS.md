@@ -103,7 +103,9 @@ or credentials without explicit instruction.
 - **Check whether the cloud build is healthy:** the Actions tab shows every run. The public
   API also works without auth, e.g.
   `https://api.github.com/repos/24EMK24/dashboard/actions/runs?per_page=5`.
-- **The Refresh button refreshes WEATHER AND SCORES, and nothing else** (scores added
+- **Since 2026-11-09 it also refreshes YouTube videos — but ONLY when `youtube_relay` is set
+  in `config.json`**, and `refreshLabel()` only says "videos" in that case.
+- **The Refresh button refreshes WEATHER AND SCORES** (scores added
   2026-09-01). Those are the only two things the browser can fetch for itself; stocks,
   YouTube and news are baked into the file by Python and can only change on a rebuild. Eli
   raised this himself — the button "only refreshes the weather" — so **the label now names
@@ -298,8 +300,27 @@ Split into a **`panels/` package** (done at panel three, 2026-07-22). Layout:
 - **`panels/weather.py`** — `build_weather_panel()` (Open-Meteo, Pacific). Its `weather_label`
   / `to_ampm` are MIRRORED by JS in `template.html`; keep the two in sync.
 - **`panels/stocks.py`** — `build_stocks_panel()` (yfinance, cached, sparklines).
-- **`panels/youtube.py`** — `build_youtube_panel()` (**25** channel RSS feeds, today-only in
-  Pacific, cached via `get_cached("youtube", …)`). **The live/rerun filter was REMOVED
+- **`relay/worker.js` — the Cloudflare YouTube relay (added 2026-11-09).** YouTube's feed
+  sends **no `Access-Control-Allow-Origin`**, so a browser cannot read it; this ~40-line
+  Worker fetches `?channel_id=UC…` from YouTube and hands it back with that header (refusing
+  anything that is not a channel id). It runs on **Cloudflare, not GitHub** — editing the file
+  here changes nothing until it is pasted into the Cloudflare dashboard again. Its address
+  goes in `config.json` as **`youtube_relay`** (empty = no relay; the page then shows only the
+  build's cards and the Refresh button does not mention videos). Why: the build step measured
+  **5 s in the morning and 230–270 s in the evening** — YouTube throttles GitHub's shared
+  runners at busy hours and throttled channels fall back to carried-forward data, which is
+  how videos went missing. More rebuilds cannot fix that; asking from the browser does.
+  **The page MERGES live videos into the build's cards, never replaces them**, so a channel
+  the relay misses keeps what the build had. `refreshYouTube()` in `template.html` runs on
+  page load and from the Refresh button; the stamp says honestly how many channels answered.
+- **"New Videos" (was "New Today") has NO MIDNIGHT WIPE since 2026-11-09** (Eli: he ✕'s
+  everything himself). It shows the last **`RECENT_HOURS = 72`** (`panels/youtube.py`, handed
+  to the browser in `data-window-hours` so both sides agree). ✕'s are stored as
+  `yt_dismissed_v2` = `{videoId: whenMs}` and pruned once older than the window + 1 day; the
+  old date-keyed `yt_dismissed_v1` is carried over once and deleted. Build cards carry
+  `data-published` so the browser can merge and order them.
+- **`panels/youtube.py`** — `build_youtube_panel()` (**28** channel RSS feeds, last 72 h,
+  cached via `get_cached("youtube", …)`). **The live/rerun filter was REMOVED
   2026-07-27** at Eli's request — nothing is hidden by title any more. Do not re-add it without
   him asking: measured on a real 375-video cache it hid **1** video, and when he reported
   missing videos the actual cause was the ~2-hour rebuild gap (see the workflow note above),

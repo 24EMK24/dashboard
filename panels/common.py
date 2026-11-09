@@ -33,6 +33,7 @@ def load_config():
         "youtube_channels": [],   # no channels by default; Eli lists his in config.json
         "news_subjects": [],      # no news subjects by default; Eli lists his in config.json
         "sports_teams": [],       # no teams by default; Eli lists his in config.json
+        "youtube_relay": "",      # no relay by default; the page then uses the build's videos only
     }
     try:
         with open("config.json", "r", encoding="utf-8") as f:
@@ -59,6 +60,10 @@ def load_config():
         # Each team is a dict: {"name", "sport", "league", "team"} — the last three are
         # the words ESPN's address needs, e.g. baseball / mlb / sea.
         "sports_teams": config.get("sports_teams", defaults["sports_teams"]),
+        # The address of the Cloudflare relay (relay/worker.js) that lets the BROWSER read
+        # YouTube's feeds. Empty means "no relay yet" — the page then shows only the videos
+        # the last build fetched, exactly as it did before the relay existed.
+        "youtube_relay": config.get("youtube_relay", defaults["youtube_relay"]),
     }
 
 
@@ -71,6 +76,7 @@ TICKERS = _config["tickers"]                   # the stock tickers to show
 YOUTUBE_CHANNELS = _config["youtube_channels"] # the YouTube channels to follow
 NEWS_SUBJECTS = _config["news_subjects"]       # the news subjects to watch on Google News
 SPORTS_TEAMS = _config["sports_teams"]         # the teams whose scores show at the top
+YOUTUBE_RELAY = _config["youtube_relay"]       # the Cloudflare relay's address, or "" for none
 
 
 # ---------------------------------------------------------------------------
