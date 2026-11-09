@@ -1,6 +1,9 @@
 {
-  "location": { "name": "Seattle", "lat": 47.61, "lon": -122.33 },
-  "tickers": ["AAPL", "MSFT", "NVDA"],
+  "location": { "name": "Seattle", "lat": 47.72, "lon": -122.30 },
+  "tickers": [
+    { "name": "S&P 500", "symbol": "^GSPC" },
+    { "name": "Nasdaq",  "symbol": "^IXIC" }
+  ],
   "youtube_channels": [
     { "name": "Asmongold TV",        "channel_id": "UCQeRaTukNYft1_6AZPACnog" },
     { "name": "Asmongold Clips",     "channel_id": "UCMwJJL5FJFuTRT55ksbQ4GQ" },
@@ -33,8 +36,8 @@
   ],
   "youtube_relay": "https://yt-relay.24emk24.workers.dev",
   "sports_teams": [
-    { "name": "Mariners", "sport": "baseball", "league": "mlb", "team": "sea" },
-    { "name": "Seahawks", "sport": "football", "league": "nfl", "team": "sea" }
+    { "name": "Mariners", "sport": "baseball", "league": "mlb", "team": "sea", "show_within_hours": 24 },
+    { "name": "Seahawks", "sport": "football", "league": "nfl", "team": "sea", "show_within_hours": 168 }
   ],
   "news_subjects": [
     { "name": "Top news",      "query": "" },

@@ -45,6 +45,10 @@
 
   .updated { margin: 0.2rem 0 0.75rem; color: #4a6076; font-size: 0.8rem; }
 
+  /* Make the "hidden" attribute always win. Without this, a rule like ".scores-strip
+     { display: flex }" would quietly override it and a hidden score card would still show. */
+  [hidden] { display: none !important; }
+
   /* the "right now" card — kept compact so the widget stays short */
   .hero {
     display: flex; align-items: center; gap: 0.9rem; margin-bottom: 0.9rem;
@@ -79,15 +83,15 @@
     display: flex; align-items: center; gap: 0.6rem;
     background: rgba(255, 255, 255, 0.7); border-radius: 12px; padding: 0.5rem 0.7rem;
   }
-  .stock-sym { font-weight: 700; width: 48px; flex: 0 0 auto; }
+  /* wide enough for a name like "S&P 500" (it was 48px when it held "AAPL") */
+  .stock-sym { font-weight: 700; width: 72px; flex: 0 0 auto; }
   .spark { width: 110px; height: 34px; flex: 0 0 auto; }
   .stock-nums { margin-left: auto; text-align: right; }
   .stock-price { font-weight: 700; }
   .stock-change { font-size: 0.78rem; }
 
   /* youtube: a vertical list of video cards (thumbnail + title). Like the other
-     widgets it has a capped height and scrolls inside itself to stay compact. Both
-     the "New Today" and "Watch Later" widgets share this .yt-list / .yt-card styling. */
+     widgets it has a capped height and scrolls inside itself to stay compact. */
   .yt-list { display: flex; flex-direction: column; gap: 0.6rem; max-height: 360px; overflow-y: auto; }
   .yt-card {
     display: flex; gap: 0.6rem;
@@ -106,12 +110,6 @@
   .yt-channel { font-size: 0.72rem; color: #4a6076; }
   /* margin-top: auto pushes the buttons to the bottom of the card, lined up neatly */
   .yt-actions { margin-top: auto; display: flex; gap: 0.4rem; align-items: center; }
-  .yt-save {
-    border: none; background: #2b7de0; color: #fff; cursor: pointer;
-    font-size: 0.72rem; padding: 0.25rem 0.5rem; border-radius: 999px;
-  }
-  .yt-save:hover { background: #1e63bd; }
-  .yt-save:disabled { opacity: 0.6; cursor: default; }
   .yt-remove {
     border: none; background: rgba(0, 0, 0, 0.08); color: #33495e; cursor: pointer;
     font-size: 0.72rem; line-height: 1; padding: 0.25rem 0.45rem; border-radius: 999px;
@@ -250,15 +248,28 @@
   /* When the scores were really fetched. flex-basis:100% forces it onto its own line
      underneath the cards. */
   .score-stamp { flex-basis: 100%; font-size: 0.68rem; color: #6a819a; }
+
+  /* Candle lighting / Havdalah (added 2026-11-09). Styled like a score card so the top of
+     the page reads as one family of "coming up soon" items. A warm candle colour on the
+     left edge sets it apart from the games. */
+  .shabbat-strip {
+    margin: 0 0 1.4rem; padding: 0.6rem 0.85rem; border-radius: 10px;
+    background: rgba(255, 255, 255, 0.85); border: 1px solid #d7e2ec;
+    border-left: 4px solid #e0a12b;
+  }
+  .shabbat-title { font-weight: 700; color: #23384b; font-size: 0.95rem; margin-bottom: 0.35rem; }
+  .shabbat-row { display: flex; gap: 0.6rem; align-items: baseline; font-size: 0.9rem; color: #23384b; }
+  .shabbat-day { color: #6a819a; font-size: 0.8rem; min-width: 6.5rem; }
+  .shabbat-time { font-weight: 700; }
+  .shabbat-note { color: #6a819a; font-size: 0.75rem; }
 </style>
 </head>
 <body>
 <div class="page-head">
 <h1>Eli's Dashboard</h1>
-<!-- One button to refresh the parts of the page the browser can fetch for itself:
-     weather, and the score cards. Python-built widgets (stocks, YouTube, news) are baked
-     into the file and stay put until a rebuild — the label names what it really does
-     rather than implying a full refresh. -->
+<!-- One button to refresh everything the browser can fetch for itself. Since 2026-11-09,
+     with the relay set up, that is the whole page; without it, only weather and scores —
+     refreshLabel() in the script picks the honest wording. -->
 <button id="refresh-btn" onclick="refreshAll()">Refresh weather &amp; scores &#8635;</button>
 </div>
 
@@ -267,15 +278,40 @@
      at the bottom of this file. -->
 __FRESHNESS__
 
-<!-- The score keeper: Mariners and Seahawks. Sits above the widget grid because it is
-     the thing Eli wants to see first. Built by Python (panels/scores.py); it is a plain
-     strip rather than a grid widget so it stays one short row and doesn't push the
-     widgets down the page. -->
+<!-- The score keeper: Mariners and Seahawks. Sits above the widget grid, but since
+     2026-11-09 each card only APPEARS when its team has a game soon (see
+     teamCardShouldShow in the script) — Eli: "I just want that widget to be gone"
+     otherwise. Built by Python (panels/scores.py) as empty shells, filled by the script. -->
 __SCORES__
 
-<!-- All widgets live in this grid so they sit side by side and each stays its
-     own compact height, instead of stacking into one tall scrolling column. -->
+<!-- Candle lighting and Havdalah for the coming Shabbat or holiday (added 2026-11-09).
+     Hidden until the day before candle lighting, then shown until Havdalah has passed —
+     both times together, because Eli can't use his phone on Shabbat. Filled entirely by
+     the script from Hebcal, which the browser may read directly. -->
+<div class="shabbat-strip" id="shabbat-strip" hidden></div>
+
+<!-- All widgets live in this grid so they sit side by side and each stays its own compact
+     height. ORDER (Eli, 2026-11-09): YouTube, News, Stocks, then Weather last. -->
 <div class="grid">
+
+<!-- "New Videos": the last 3 days of YouTube uploads. Python fills in the video cards from
+     the last build; the script merges in newer ones live through the Cloudflare relay. -->
+<section class="panel youtube">
+__YOUTUBE__
+</section>
+
+<!-- News: today's Google News headlines for each subject Eli watches, with a badge showing
+     how many outlets carried the same story. Built by Python (panels/news.py) as the
+     backup; the script redraws it live through the relay. -->
+<section class="panel news">
+__NEWS__
+</section>
+
+<!-- Stocks: the S&P 500 and the Nasdaq. Built by Python as the backup; the script replaces
+     each row with live prices through the relay. -->
+<section class="panel stocks">
+__STOCKS__
+</section>
 
 <section class="panel weather">
   <h2>Weather · __LOCATION_NAME__</h2>
@@ -285,31 +321,7 @@ __WEATHER_BODY__
   </div>
 </section>
 
-<section class="panel stocks">
-__STOCKS__
-</section>
-
-<!-- "New Videos": the last 3 days of YouTube uploads. Python fills in the video cards from
-     the last build; the JavaScript below merges in newer ones live through the Cloudflare
-     relay, and makes the ✕ and "+ Watch later" buttons work. -->
-<section class="panel youtube">
-__YOUTUBE__
-</section>
-
-<!-- News: recent Google News headlines for each subject Eli watches, with a badge
-     showing how many outlets carried the same story. Built by Python (panels/news.py). -->
-<section class="panel news">
-__NEWS__
-</section>
-
-<!-- "Watch Later": videos saved from the list above. This one is filled in entirely
-     by JavaScript from the browser's saved list (localStorage), because Python has no
-     way to know what Eli saved in the browser. Starts empty; the script populates it. -->
-<section class="panel watchlater">
-  <h2>Watch Later</h2>
-  <p class="updated">Saved videos stay here until you remove them.</p>
-  <div class="yt-list" id="watch-later-list"></div>
-</section>
+<!-- (A "Watch Later" widget sat here until 2026-11-09; Eli had it removed.) -->
 
 </div>
 
@@ -432,10 +444,13 @@ async function refreshWeather() {
 // strip is for. A button labelled just "Refresh" quietly promises more than it can
 // deliver, so it names the things it genuinely does — and refreshLabel() only adds
 // "videos" when the relay is actually set up.
+// Since the second round on 2026-11-09, with the relay set up, EVERY widget refreshes
+// live — videos, news and stocks through the relay; weather, scores and candle lighting
+// directly — so the button can honestly say "everything".
 function refreshLabel() {
   const box = document.getElementById("yt-live-config");
   const hasRelay = !!(box && box.dataset.relay);
-  return hasRelay ? "Refresh weather, scores &amp; videos &#8635;"
+  return hasRelay ? "Refresh everything &#8635;"
                   : "Refresh weather &amp; scores &#8635;";
 }
 
@@ -445,7 +460,8 @@ async function refreshAll() {
   const btn = document.getElementById("refresh-btn");
   btn.disabled = true;
   btn.innerHTML = "Refreshing…";
-  await Promise.all([refreshWeather(), refreshScores(), refreshYouTube()]);
+  await Promise.all([refreshWeather(), refreshScores(), refreshShabbat(),
+                     refreshYouTube(), refreshNews(), refreshStocks()]);
   btn.disabled = false;
   btn.innerHTML = refreshLabel();
 }
@@ -632,7 +648,7 @@ function opponentLabel(game) {
 
 // Build the one line of a card that carries a score, as real elements rather than as a
 // string of HTML. Everything from ESPN goes in through textContent, so a team name could
-// never smuggle markup onto the page — the same habit the Watch Later list follows.
+// never smuggle markup onto the page — the same habit the live YouTube and news cards follow.
 function renderGameLine(game, isLive) {
   const line = document.createElement("div");
   line.className = "score-line";
@@ -817,6 +833,32 @@ async function loadTeamCard(card, pastGamesShown) {
     none.textContent = "No games scheduled.";
     body.appendChild(none);
   }
+
+  // Finally: should this card be on the page at all right now? (see below)
+  card.hidden = !teamCardShouldShow(card, playingNow, played, upcoming);
+}
+
+// WHEN A TEAM'S CARD SHOWS (Eli, 2026-11-09): only when there is a game SOON. Otherwise
+// the card is gone entirely — he did not want an off-season or an off-day card sitting at
+// the top of the page. "Soon" is per team, from show_within_hours in config.json (handed
+// over as data-show-within-hours): 24 hours for the Mariners, 168 (a week) for the
+// Seahawks, since football plays once a week and a 24-hour rule would hide the card for
+// most of the season. A card also shows while a game is live, and for 16 hours after the
+// last game STARTED (roughly: through the evening after it ends), so the final score is
+// still there to see.
+const JUST_PLAYED_HOURS = 16;
+
+function teamCardShouldShow(card, playingNow, played, upcoming) {
+  const now = Date.now();
+  const hour = 3600 * 1000;
+  if (playingNow) { return true; }
+  const withinHours = Number(card.dataset.showWithinHours) || 24;
+  // ESPN lists games in date order, so the first upcoming one is the soonest.
+  const next = upcoming.length ? upcoming[0].startsAt : null;
+  if (next && next.getTime() - now <= withinHours * hour) { return true; }
+  const last = played.length ? played[played.length - 1].startsAt : null;
+  if (last && now - last.getTime() <= JUST_PLAYED_HOURS * hour) { return true; }
+  return false;
 }
 
 // Refresh every score card. Called once when the page loads, and again whenever Eli
@@ -844,8 +886,13 @@ async function refreshScores() {
       note.className = "score-empty";
       note.textContent = "Scores unavailable right now.";
       body.appendChild(note);
+      // We can't tell whether a game is soon, so say so rather than silently hiding it.
+      card.hidden = false;
     }
   }));
+
+  // The strip itself (with its "As of" stamp) only shows when at least one card does.
+  strip.hidden = !strip.querySelector(".score-card:not([hidden])");
 
   // The stamp says when the BROWSER fetched, which on this design is a truer answer than
   // the old build-time stamp: these numbers are as new as the moment you are reading them.
@@ -855,19 +902,18 @@ async function refreshScores() {
 }
 
 // ==================================================================
-// YouTube widgets: "New Today" deletions + "Watch Later" list
+// YouTube widget: "New Videos" deletions
 // ------------------------------------------------------------------
 // A static HTML file has no server to remember things between runs, so we use the
 // browser's built-in localStorage — a small per-browser box that survives page
-// reloads. We keep two things in it:
-//   * which videos Eli has ✕'d (so a ✕ sticks — since 2026-11-09, for good, not just
-//     for the rest of the day)
-//   * his "Watch Later" list (which survives across days until he removes an item)
+// reloads. We keep in it which videos Eli has ✕'d (so a ✕ sticks — since 2026-11-09, for
+// good, not just for the rest of the day).
+// (A "Watch Later" list was kept here too until 2026-11-09, when Eli had it removed. Its
+// saved data, under "yt_watch_later_v1", is simply left alone in the browser.)
 // ==================================================================
 
 // The names we store our things under. The "_v1"/"_v2" suffix lets us change the shape
 // later without clashing with old saved data.
-const LATER_KEY = "yt_watch_later_v1";
 // v2 (2026-11-09): { videoId: when it was ✕'d, in ms }. v1 was { "2026-11-09": [ids] },
 // which forgot everything at midnight. See getDismissed() for how v1 is carried over.
 const DISMISS_KEY = "yt_dismissed_v2";
@@ -889,10 +935,6 @@ function loadJSON(key, fallback) {
     return fallback;
   }
 }
-
-// --- Watch Later storage ---
-function loadLater() { return loadJSON(LATER_KEY, []); }          // array of video objects
-function saveLater(items) { localStorage.setItem(LATER_KEY, JSON.stringify(items)); }
 
 // --- Dismissed-video storage ---
 // How long the list may reach back, in hours. Python hands this over (RECENT_HOURS in
@@ -954,7 +996,7 @@ function dismissToday(btn) {
 }
 
 // Clicking a video's thumbnail or title opens it AND takes it off the list — Eli asked for
-// a video to clear once he's clicked it, in both lists.
+// a video to clear once he's clicked it.
 //
 // This does NOT call preventDefault, so the link still opens in a new tab exactly as
 // before; we only tidy up behind it. The tidying is wrapped in a 0-millisecond setTimeout
@@ -964,105 +1006,9 @@ function dismissToday(btn) {
 function clearOnOpen(el) {
   const card = el.closest(".yt-card");
   if (!card) return;
-  const vid = card.dataset.vid;
-  // Which of the two lists is this card in? Opening a "New Videos" card dismisses it like
-  // a ✕; opening a Watch Later card takes it off that list.
-  const inWatchLater = !!card.closest("#watch-later-list");
   setTimeout(function () {
-    if (inWatchLater) {
-      removeFromLater(vid);
-    } else {
-      dismissTodayCard(card);
-    }
+    dismissTodayCard(card);
   }, 0);
-}
-
-// Save one of today's videos to Watch Later. The button passes itself in as `btn`, so
-// we climb up to its card with .closest() to read the card's data-* attributes.
-function saveForLater(btn) {
-  const card = btn.closest(".yt-card");
-  const video = {
-    video_id: card.dataset.vid,
-    title: card.dataset.title,
-    url: card.dataset.url,
-    thumbnail: card.dataset.thumb,
-    channel: card.dataset.channel
-  };
-  const items = loadLater();
-  // Don't add the same video twice.
-  if (!items.some(function (x) { return x.video_id === video.video_id; })) {
-    items.push(video);
-    saveLater(items);
-    renderWatchLater();
-  }
-  // Saving also removes the video from "New Videos" (and remembers that, so it doesn't
-  // come back on reload) — the same effect as pressing ✕.
-  dismissToday(btn);
-}
-
-// Remove one video from Watch Later (only ever happens on its own ✕ press).
-function removeFromLater(videoId) {
-  const items = loadLater().filter(function (x) { return x.video_id !== videoId; });
-  saveLater(items);
-  renderWatchLater();
-}
-
-// Draw the whole Watch Later list from saved data. We build real elements and use
-// textContent for the title/channel, so a video title can never inject HTML.
-function renderWatchLater() {
-  const box = document.getElementById("watch-later-list");
-  const items = loadLater();
-  box.innerHTML = "";   // clear, then rebuild from scratch
-
-  if (items.length === 0) {
-    const note = document.createElement("p");
-    note.className = "yt-empty";
-    note.textContent = 'Nothing saved yet. Press "+ Watch later" on a video.';
-    box.appendChild(note);
-    return;
-  }
-
-  for (const v of items) {
-    const card = document.createElement("div");
-    card.className = "yt-card";
-    // Carry the video id on the card, the same way the Python-built "New Today" cards do.
-    // clearOnOpen reads it to know which video to remove when the card is clicked.
-    card.dataset.vid = v.video_id;
-
-    const thumbLink = document.createElement("a");
-    thumbLink.className = "yt-thumb-link";
-    thumbLink.href = v.url; thumbLink.target = "_blank"; thumbLink.rel = "noopener";
-    // Clicking a saved video opens it and drops it from the list (see clearOnOpen).
-    thumbLink.onclick = function () { clearOnOpen(this); };
-    const img = document.createElement("img");
-    img.className = "yt-thumb"; img.src = v.thumbnail; img.alt = ""; img.loading = "lazy";
-    thumbLink.appendChild(img);
-
-    const meta = document.createElement("div");
-    meta.className = "yt-meta";
-    const title = document.createElement("a");
-    title.className = "yt-title";
-    title.href = v.url; title.target = "_blank"; title.rel = "noopener";
-    title.onclick = function () { clearOnOpen(this); };
-    title.textContent = v.title;
-    const chan = document.createElement("div");
-    chan.className = "yt-channel";
-    chan.textContent = v.channel;
-    const actions = document.createElement("div");
-    actions.className = "yt-actions";
-    const remove = document.createElement("button");
-    remove.className = "yt-remove"; remove.title = "Remove";
-    remove.innerHTML = "&#10005;";
-    remove.onclick = function () { removeFromLater(v.video_id); };
-    actions.appendChild(remove);
-
-    meta.appendChild(title);
-    meta.appendChild(chan);
-    meta.appendChild(actions);
-    card.appendChild(thumbLink);
-    card.appendChild(meta);
-    box.appendChild(card);
-  }
 }
 
 // On page load, hide any videos Eli already ✕'d, and any that have aged out of the window
@@ -1097,7 +1043,7 @@ function applyDismissed() {
 // Draw one "New Videos" card. Built from real elements with textContent (never innerHTML)
 // for the title and channel, so a video title can never inject HTML. The shape — classes,
 // data-* attributes, buttons — matches the cards panels/youtube.py writes exactly, so the
-// ✕, "+ Watch later" and click-to-clear work the same on both.
+// ✕ and click-to-clear work the same on both.
 function buildNewVideoCard(v) {
   const card = document.createElement("div");
   card.className = "yt-card";
@@ -1129,15 +1075,10 @@ function buildNewVideoCard(v) {
 
   const actions = document.createElement("div");
   actions.className = "yt-actions";
-  const save = document.createElement("button");
-  save.className = "yt-save";
-  save.textContent = "+ Watch later";
-  save.onclick = function () { saveForLater(this); };
   const remove = document.createElement("button");
   remove.className = "yt-remove"; remove.title = "Remove";
   remove.innerHTML = "&#10005;";
   remove.onclick = function () { dismissToday(this); };
-  actions.appendChild(save);
   actions.appendChild(remove);
 
   meta.appendChild(title);
@@ -1358,19 +1299,447 @@ function applyDismissedNews() {
   }
 }
 
+// The relay's address for one widget, from that widget's hidden config box ("" if none).
+// Strips a trailing "/" so either spelling in config.json works.
+function relayFrom(configId) {
+  const box = document.getElementById(configId);
+  return box && box.dataset.relay ? box.dataset.relay.replace(/\/+$/, "") : "";
+}
+
+// ==================================================================
+// Live stocks, through the relay (added 2026-11-09)
+// ------------------------------------------------------------------
+// Yahoo, like YouTube, does not let a browser read it directly, so prices come through
+// the relay (?stock=SYMBOL). Each row Python drew is REPLACED by a fresh one when the
+// relay answers for that symbol, and left as it was when it doesn't. Mirrors
+// panels/stocks.py — keep the number formatting and the sparkline in step with it.
+// ==================================================================
+
+// "7,549.94": two decimals with thousands commas, like Python's "{:,.2f}".
+function formatTwoDecimals(n) {
+  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// The price as shown: a "$" only for a company's shares. An index (symbol starts with
+// "^", like ^GSPC) is measured in points, not dollars. Same rule as format_price().
+function formatPrice(symbol, price) {
+  const text = formatTwoDecimals(price);
+  return symbol.charAt(0) === "^" ? text : "$" + text;
+}
+
+// A tiny line chart of the day's prices, as SVG text. A translation of sparkline_svg()
+// in panels/stocks.py. Built only from numbers, so it can't carry anything unsafe.
+function sparklineSvg(prices, goingUp) {
+  if (!prices || prices.length < 2) return "";
+  const width = 150, height = 40, pad = 4;
+  const low = Math.min.apply(null, prices);
+  const high = Math.max.apply(null, prices);
+  const span = (high - low) || 1;          // a perfectly flat line would divide by zero
+  const points = prices.map(function (p, i) {
+    const x = i / (prices.length - 1) * width;
+    const y = pad + (1 - (p - low) / span) * (height - 2 * pad);   // SVG's y grows downward
+    return x.toFixed(1) + "," + y.toFixed(1);
+  });
+  const colour = goingUp ? "#1a9e5f" : "#d64545";
+  return '<svg class="spark" viewBox="0 0 ' + width + ' ' + height + '" preserveAspectRatio="none">'
+       + '<polyline points="' + points.join(" ") + '" fill="none" stroke="' + colour + '"'
+       + ' stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>';
+}
+
+// Ask the relay for one symbol and return {price, previous, prices}. Throws on failure.
+// Like panels/stocks.py: today's prices every 15 minutes, or — if today has none yet
+// (weekend, holiday, early morning) — the last few days, one price a day.
+async function fetchStockLive(relay, symbol) {
+  const base = relay + "/?stock=" + encodeURIComponent(symbol);
+  const reply = await fetch(base + "&range=1d");
+  if (!reply.ok) throw new Error("relay answered " + reply.status);
+  const result = (await reply.json()).chart.result[0];
+  const meta = result.meta;
+  // Yahoo leaves gaps (null) where no trade happened in a 15-minute slot; drop those.
+  let prices = (result.indicators.quote[0].close || []).filter(function (p) { return p != null; });
+  // "previousClose" is yesterday's closing price — what today's change is measured from.
+  let previous = meta.previousClose != null ? meta.previousClose : meta.chartPreviousClose;
+  if (prices.length < 2) {
+    const daily = await fetch(base + "&range=5d");
+    if (daily.ok) {
+      const dailyResult = (await daily.json()).chart.result[0];
+      prices = (dailyResult.indicators.quote[0].close || []).filter(function (p) { return p != null; });
+    }
+  }
+  if (typeof meta.regularMarketPrice !== "number" || typeof previous !== "number") {
+    throw new Error("no price in the reply");
+  }
+  return { price: meta.regularMarketPrice, previous: previous, prices: prices };
+}
+
+// One stock row, the same shape panels/stocks.py draws. The name goes in as textContent
+// so nothing in config.json can inject HTML.
+function buildStockRow(ticker, data) {
+  const change = data.price - data.previous;
+  const percent = change / data.previous * 100;
+  const goingUp = change >= 0;
+  const sign = goingUp ? "+" : "";
+
+  const row = document.createElement("div");
+  row.className = "stock";
+  row.dataset.symbol = ticker.symbol;
+  const name = document.createElement("div");
+  name.className = "stock-sym";
+  name.textContent = ticker.name;
+  row.appendChild(name);
+  row.insertAdjacentHTML("beforeend", sparklineSvg(data.prices, goingUp));
+  const nums = document.createElement("div");
+  nums.className = "stock-nums";
+  const price = document.createElement("div");
+  price.className = "stock-price";
+  price.textContent = formatPrice(ticker.symbol, data.price);
+  const moved = document.createElement("div");
+  moved.className = "stock-change";
+  moved.style.color = goingUp ? "green" : "red";
+  moved.textContent = sign + formatTwoDecimals(change) + " (" + sign + percent.toFixed(2) + "%)";
+  nums.appendChild(price);
+  nums.appendChild(moved);
+  row.appendChild(nums);
+  return row;
+}
+
+async function refreshStocks() {
+  const relay = relayFrom("stocks-live-config");
+  const list = document.getElementById("stocks-list");
+  const stamp = document.getElementById("stocks-stamp");
+  if (!relay || !list) return;             // no relay, or the panel failed soft
+  const tickers = JSON.parse(document.getElementById("stocks-live-config").dataset.tickers || "[]");
+  if (stamp) stamp.textContent = "Checking prices…";
+
+  const answers = await Promise.all(tickers.map(function (t) {
+    return fetchStockLive(relay, t.symbol).catch(function () { return null; });
+  }));
+
+  // Rebuild in config.json's order: a live row where the relay answered, otherwise the
+  // row the build drew for that symbol (if it drew one).
+  const oldRows = {};
+  list.querySelectorAll(".stock").forEach(function (row) { oldRows[row.dataset.symbol] = row; });
+  list.innerHTML = "";
+  let answered = 0;
+  tickers.forEach(function (t, i) {
+    if (answers[i]) { answered += 1; list.appendChild(buildStockRow(t, answers[i])); }
+    else if (oldRows[t.symbol]) { list.appendChild(oldRows[t.symbol]); }
+  });
+
+  if (stamp) {
+    const when = pacificClock(new Date());
+    if (answered === tickers.length) stamp.textContent = "Live · checked " + when;
+    else if (answered > 0) stamp.textContent = "Live · checked " + when + " · " + answered + " of " + tickers.length + " answered";
+    else stamp.textContent = "Couldn't reach Yahoo at " + when + " · showing the last build's prices";
+  }
+}
+
+// ==================================================================
+// Live news, through the relay (added 2026-11-09)
+// ------------------------------------------------------------------
+// Google News comes through the relay (?news=QUERY). Each subject is fetched fresh,
+// grouped into stories exactly the way panels/news.py does it, and drawn in the same
+// shape — so the ✕ buttons and today's dismissals keep working unchanged. A subject the
+// relay could not get keeps the group the build drew.
+//
+// The grouping below is a TRANSLATION of significant_words / same_story / cluster_stories
+// in panels/news.py. If one changes, change the other, or the build and the live page
+// will group the same headlines differently.
+// ==================================================================
+
+const NEWS_STOPWORDS = new Set([
+  "the", "a", "an", "and", "or", "but", "for", "nor", "so", "yet", "of", "to", "in",
+  "on", "at", "by", "with", "from", "as", "is", "are", "was", "were", "be", "been",
+  "it", "its", "this", "that", "these", "those", "he", "she", "they", "you", "we",
+  "his", "her", "their", "your", "our", "not", "will", "has", "have", "had", "new",
+  "says", "say", "said", "after", "over", "into", "out", "up", "down", "who", "what",
+  "how", "why", "when", "amid", "vs", "-"
+]);
+
+// A headline reduced to its meaningful words (a Set), minus the `ignore` words.
+function significantWords(headline, ignore) {
+  const words = (headline || "").toLowerCase().match(/[a-z0-9]+/g) || [];
+  const keep = new Set();
+  words.forEach(function (w) {
+    if ((w.length >= 3 || /^\d+$/.test(w)) && !NEWS_STOPWORDS.has(w) && !(ignore && ignore.has(w))) {
+      keep.add(w);
+    }
+  });
+  return keep;
+}
+
+// Same crude test as same_story(): 2+ shared words, making up 40%+ of the shorter one.
+function sameStory(a, b) {
+  if (!a.size || !b.size) return false;
+  let shared = 0;
+  a.forEach(function (w) { if (b.has(w)) shared += 1; });
+  if (shared < 2) return false;
+  return shared / Math.min(a.size, b.size) >= 0.4;
+}
+
+// Greedy grouping, as cluster_stories(): each item joins the first story it matches.
+function clusterStories(items, ignore) {
+  const stories = [];
+  items.forEach(function (item) {
+    const words = significantWords(item.headline, ignore);
+    const home = stories.find(function (s) { return sameStory(words, s.words); });
+    if (home) {
+      home.items.push(item);
+      words.forEach(function (w) { home.words.add(w); });   // grow the story's word set
+    } else {
+      stories.push({ words: words, items: [item] });
+    }
+  });
+  return stories;
+}
+
+// "2h ago" — same wording as relative_time() in Python.
+function relativeTime(epoch) {
+  const diff = Date.now() / 1000 - epoch;
+  if (diff < 3600) return Math.max(1, Math.floor(diff / 60)) + "m ago";
+  if (diff < 86400) return Math.floor(diff / 3600) + "h ago";
+  return Math.floor(diff / 86400) + "d ago";
+}
+
+// Ask the relay for one subject's feed and turn it into items shaped like Python's
+// entry_to_item(): {headline, url, source, published_epoch}. Throws on failure.
+async function fetchNewsLive(relay, query) {
+  const reply = await fetch(relay + "/?news=" + encodeURIComponent(query || ""));
+  if (!reply.ok) throw new Error("relay answered " + reply.status);
+  const xml = new DOMParser().parseFromString(await reply.text(), "text/xml");
+  const items = [];
+  for (const entry of xml.getElementsByTagName("item")) {
+    const text = function (tag) {
+      const el = entry.getElementsByTagName(tag)[0];
+      return el ? el.textContent.trim() : "";
+    };
+    const published = Date.parse(text("pubDate"));
+    if (isNaN(published)) continue;                  // no date: can't order it, skip
+    // Google writes titles as "Headline - Outlet"; split on the LAST " - ".
+    const raw = text("title");
+    const cut = raw.lastIndexOf(" - ");
+    const headline = cut >= 0 ? raw.slice(0, cut).trim() : raw;
+    const outletFromTitle = cut >= 0 ? raw.slice(cut + 3).trim() : "";
+    items.push({
+      headline: headline,
+      url: text("link"),
+      source: text("source") || outletFromTitle || "Unknown",
+      published_epoch: Math.floor(published / 1000)
+    });
+  }
+  return items;
+}
+
+// Draw one subject's group from its items — the same HTML shape build_news_panel() writes.
+// Already-dismissed stories are left out BEFORE taking the top few, so a ✕ doesn't leave a
+// subject showing fewer stories than it could.
+function buildNewsSubject(subject, items, perSubject, dismissedIds) {
+  const today = pacificYmd(new Date());
+  const todays = items.filter(function (i) { return pacificYmd(new Date(i.published_epoch * 1000)) === today; });
+  // Ignore the subject's own words when matching (see the Half-Life 3 note in news.py).
+  const ignore = significantWords((subject.name || "") + " " + (subject.query || ""));
+  const ranked = clusterStories(todays, ignore).map(function (story) {
+    const sources = Array.from(new Set(story.items.map(function (i) { return i.source; }))).sort();
+    const newest = story.items.reduce(function (a, b) { return b.published_epoch > a.published_epoch ? b : a; });
+    return { headline: newest.headline, url: newest.url, sources: sources, count: sources.length, epoch: newest.published_epoch };
+  }).filter(function (s) { return !dismissedIds.includes(s.url); })
+    .sort(function (a, b) { return (b.count - a.count) || (b.epoch - a.epoch); })
+    .slice(0, perSubject);
+
+  const group = document.createElement("div");
+  group.className = "news-subject";
+  group.dataset.subject = subject.name;
+  const heading = document.createElement("div");
+  heading.className = "news-subject-title";
+  heading.textContent = subject.name;
+  if (ranked.length) {
+    const clear = document.createElement("button");
+    clear.className = "news-clear"; clear.title = "Clear these headlines";
+    clear.innerHTML = "&#10005;";
+    clear.onclick = function () { clearNewsSubject(this); };
+    heading.appendChild(clear);
+  }
+  group.appendChild(heading);
+
+  ranked.forEach(function (story) {
+    const row = document.createElement("div");
+    row.className = "news-story";
+    row.dataset.newsid = story.url;
+    const link = document.createElement("a");
+    link.className = "news-headline";
+    link.href = story.url; link.target = "_blank"; link.rel = "noopener";
+    link.textContent = story.headline;
+    const sub = document.createElement("div");
+    sub.className = "news-sub";
+    const badge = document.createElement("span");
+    badge.className = "news-badge " + (story.count >= 2 ? "multi" : "single");
+    badge.textContent = story.count >= 2 ? "✓ " + story.count + " sources" : "1 source";
+    const src = document.createElement("span");
+    src.className = "news-src";
+    const shown = story.sources.slice(0, 3);
+    src.textContent = shown.join(", ") + (story.count > shown.length ? " +" + (story.count - shown.length) : "");
+    const when = document.createElement("span");
+    when.className = "news-time";
+    when.textContent = relativeTime(story.epoch);
+    const remove = document.createElement("button");
+    remove.className = "news-remove"; remove.title = "Remove";
+    remove.innerHTML = "&#10005;";
+    remove.onclick = function () { dismissNews(this); };
+    sub.appendChild(badge); sub.appendChild(src); sub.appendChild(when); sub.appendChild(remove);
+    row.appendChild(link); row.appendChild(sub);
+    group.appendChild(row);
+  });
+  updateNewsSubjectEmpty(group);     // "Nothing today." if it ended up empty
+  return group;
+}
+
+async function refreshNews() {
+  const relay = relayFrom("news-live-config");
+  const list = document.getElementById("news-list");
+  const stamp = document.getElementById("news-stamp");
+  if (!relay || !list) return;
+  const box = document.getElementById("news-live-config");
+  const subjects = JSON.parse(box.dataset.subjects || "[]");
+  const perSubject = Number(box.dataset.perSubject) || 4;
+  if (stamp) stamp.textContent = "Checking the news…";
+
+  const answers = await Promise.all(subjects.map(function (s) {
+    return fetchNewsLive(relay, s.query).catch(function () { return null; });
+  }));
+
+  // Rebuild in config.json's order: a live group where the relay answered, otherwise the
+  // group the build drew for that subject.
+  const oldGroups = {};
+  list.querySelectorAll(".news-subject").forEach(function (g) { oldGroups[g.dataset.subject] = g; });
+  const dismissedIds = getDismissedNewsToday();
+  const scrolledTo = list.scrollTop;
+  list.innerHTML = "";
+  let answered = 0;
+  subjects.forEach(function (s, i) {
+    if (answers[i]) { answered += 1; list.appendChild(buildNewsSubject(s, answers[i], perSubject, dismissedIds)); }
+    else if (oldGroups[s.name]) { list.appendChild(oldGroups[s.name]); }
+  });
+  list.scrollTop = scrolledTo;
+  applyDismissedNews();              // tidy the kept build groups the same way as on load
+
+  if (stamp) {
+    const when = pacificClock(new Date());
+    const caveat = " · ✓ = how many outlets ran it (a rough signal, not proof)";
+    if (answered === subjects.length) stamp.textContent = "Today · live · checked " + when + caveat;
+    else if (answered > 0) stamp.textContent = "Today · live · checked " + when + " · " + answered + " of " + subjects.length + " subjects answered" + caveat;
+    else stamp.textContent = "Couldn't reach Google News at " + when + " · showing the last build's headlines";
+  }
+}
+
+// ==================================================================
+// Candle lighting and Havdalah, from Hebcal (added 2026-11-09)
+// ------------------------------------------------------------------
+// Eli asked for MyZmanim's times; MyZmanim's data service needs a paid account and a key
+// that anyone could read out of this public page, so — with his agreement — this uses
+// Hebcal, which is free, needs no key, and lets a browser read it directly (no relay).
+// Standard rule: candle lighting 18 minutes before sunset; Havdalah at nightfall (Hebcal's
+// "M=on": the sun 8.5° below the horizon).
+//
+// WHEN IT SHOWS: from the start of the day before the first candle lighting, until
+// Havdalah has passed — candle lighting AND Havdalah together, because Eli can't use his
+// phone on Shabbat, so he needs Havdalah's time before it starts. Multi-day holidays
+// (Pesach, Rosh Hashana, a Yom Tov running into Shabbat) list every candle lighting in the
+// run, then the one Havdalah at its end. The rest of the time the strip is hidden.
+// ==================================================================
+
+const SHABBAT_SHOW_DAYS_BEFORE = 1;
+
+async function refreshShabbat() {
+  const strip = document.getElementById("shabbat-strip");
+  if (!strip) return;
+  const day = 24 * 3600 * 1000;
+  const now = new Date();
+  // Ask for a window from two days ago (so a Shabbat already under way still finds its own
+  // candle lighting) to ten days ahead (so the next one is always in it).
+  const address = "https://www.hebcal.com/hebcal?v=1&cfg=json&c=on&M=on&maj=on&min=off&mod=off"
+    + "&nx=off&mf=off&ss=off&s=off&latitude=" + LATITUDE + "&longitude=" + LONGITUDE
+    + "&tzid=America/Los_Angeles&start=" + pacificYmd(new Date(now - 2 * day))
+    + "&end=" + pacificYmd(new Date(now.getTime() + 10 * day));
+
+  let items;
+  try {
+    const reply = await fetch(address);
+    if (!reply.ok) throw new Error("Hebcal answered " + reply.status);
+    items = (await reply.json()).items || [];
+  } catch (e) {
+    // Rare, but say so rather than quietly showing nothing on an Erev Shabbat.
+    strip.textContent = "Couldn't load candle-lighting times from Hebcal right now.";
+    strip.hidden = false;
+    return;
+  }
+
+  // Just the candle lightings and Havdalahs, in time order.
+  const times = items
+    .filter(function (i) { return i.category === "candles" || i.category === "havdalah"; })
+    .map(function (i) { return { kind: i.category, at: new Date(i.date), memo: i.memo || "" }; })
+    .sort(function (a, b) { return a.at - b.at; });
+
+  // The next Havdalah still to come, and the run of candle lightings just before it.
+  const end = times.findIndex(function (t) { return t.kind === "havdalah" && t.at > now; });
+  if (end < 0) { strip.hidden = true; return; }
+  let start = end;
+  while (start > 0 && times[start - 1].kind === "candles") start -= 1;
+  const run = times.slice(start, end + 1);
+
+  // Only from the day before the first candle lighting. Comparing Pacific YYYY-MM-DD text
+  // works because that format sorts in date order.
+  const firstAt = run[0].at;
+  const showFrom = pacificYmd(new Date(firstAt.getTime() - SHABBAT_SHOW_DAYS_BEFORE * day));
+  if (pacificYmd(now) < showFrom) { strip.hidden = true; return; }
+
+  // A title from Hebcal's own names: "" means plain Shabbat; "Erev Pesach", "Pesach I",
+  // "Pesach VII" all become "Pesach".
+  const names = [];
+  run.forEach(function (t) {
+    if (t.kind !== "candles") return;
+    const name = t.memo === "" ? "Shabbat"
+      : t.memo.replace(/^Erev\s+/, "").replace(/\s*\(.*\)\s*$/, "").replace(/\s+[IVX]+$/, "");
+    if (!names.includes(name)) names.push(name);
+  });
+
+  strip.innerHTML = "";
+  const title = document.createElement("div");
+  title.className = "shabbat-title";
+  title.textContent = "🕯️ " + (names.join(" · ") || "Shabbat");
+  strip.appendChild(title);
+  run.forEach(function (t) {
+    const row = document.createElement("div");
+    row.className = "shabbat-row";
+    const dayEl = document.createElement("span");
+    dayEl.className = "shabbat-day";
+    dayEl.textContent = pacificDayLabel(t.at);
+    const what = document.createElement("span");
+    what.textContent = t.kind === "candles" ? "Candle lighting" : "Havdalah";
+    const time = document.createElement("span");
+    time.className = "shabbat-time";
+    time.textContent = pacificClock(t.at);
+    row.appendChild(dayEl); row.appendChild(what); row.appendChild(time);
+    strip.appendChild(row);
+  });
+  const note = document.createElement("div");
+  note.className = "shabbat-note";
+  note.textContent = "From Hebcal · 18 min before sunset · Havdalah at nightfall";
+  strip.appendChild(note);
+  strip.hidden = false;
+}
+
 // Wire everything up once the page has loaded.
 window.addEventListener("DOMContentLoaded", function () {
   applyDismissed();
-  renderWatchLater();
   applyDismissedNews();
-  // The score cards arrive empty from Python and are filled in from ESPN here. Not
-  // awaited: the rest of the page must not sit waiting on a network call, and the cards
-  // say "Loading scores…" until it lands.
-  refreshScores();
-  // Same idea for YouTube: the build's cards show at once, and newer ones are merged in
-  // from the relay when they arrive. Not awaited, for the same reason.
   document.getElementById("refresh-btn").innerHTML = refreshLabel();
-  refreshYouTube();
+  // Everything below fetches over the network. None of it is awaited: the build's own
+  // content shows at once, and each widget updates itself when its answer lands.
+  refreshScores();       // ESPN (direct)
+  refreshShabbat();      // Hebcal (direct)
+  refreshYouTube();      // through the relay
+  refreshNews();         // through the relay
+  refreshStocks();       // through the relay
 });
 
 // ==================================================================
@@ -1453,7 +1822,7 @@ setInterval(updateFreshness, 1000);
 //
 // To avoid reloading pointlessly (e.g. every quick tab-switch), the view-based reload
 // only fires if it has been at least RELOAD_MINUTES since this page last loaded.
-// Reloading re-reads the file from disk; deletions and the Watch Later list are safe
+// Reloading re-reads the file from disk; deletions are safe
 // because those live in localStorage, which survives reloads.
 const RELOAD_MINUTES = 30;
 const pageLoadedAt = Date.now();  // when this particular page view started

@@ -4,10 +4,41 @@
 # so repeated runs don't re-hit Yahoo. Moved out of main.py during the panels/ split;
 # the logic is unchanged.
 
+#
+# SINCE 2026-11-09 THESE ROWS ARE THE BACKUP, NOT THE MAIN SOURCE. The page's JavaScript
+# asks Yahoo again (through the Cloudflare relay, relay/worker.js) every time it opens,
+# and replaces each row with a fresh one. These build-time rows are what shows if the
+# relay is down, and they stay for any symbol the relay could not get.
+# Also since then the list is the S&P 500 and the Nasdaq (Eli's choice) rather than three
+# single companies, and each entry in config.json carries a display name.
+
 # "yfinance" fetches stock prices from Yahoo Finance. No API key or account needed.
 import yfinance as yf
-# Shared bits: the tickers from config.json, and the cache helpers.
-from panels.common import TICKERS, get_cached, cached_time_label, CACHE_MAX_AGE
+# "html" makes names safe to put in the page; "json" hands the list to the browser.
+import html
+import json
+# Shared bits: the tickers from config.json, the relay address, and the cache helpers.
+from panels.common import TICKERS, get_cached, cached_time_label, CACHE_MAX_AGE, YOUTUBE_RELAY
+
+
+def ticker_list():
+    # The tickers as a list of {"name", "symbol"} dicts. config.json used to hold plain
+    # symbols like "AAPL", so a plain string is still accepted and used as its own name.
+    result = []
+    for entry in TICKERS:
+        if isinstance(entry, str):
+            result.append({"name": entry, "symbol": entry})
+        else:
+            symbol = entry.get("symbol", "")
+            result.append({"name": entry.get("name", symbol), "symbol": symbol})
+    return result
+
+
+def format_price(symbol, price):
+    # "7,549.94" — with thousands commas. A "$" in front only for a company's shares:
+    # an index (its symbol starts with "^", like ^GSPC) is measured in points, not dollars.
+    text = "{:,.2f}".format(price)
+    return text if symbol.startswith("^") else "$" + text
 
 # ---------------------------------------------------------------------------
 # Small stock helpers (shared by the panel below)
@@ -71,11 +102,13 @@ def fetch_stocks_data():
     # panel.) float(...) forces plain Python floats, because yfinance sometimes hands
     # back a special number type that json can't save.
     results = []
-    for symbol in TICKERS:
+    for entry in ticker_list():
+        symbol = entry["symbol"]
         ticker = yf.Ticker(symbol)
         info = ticker.fast_info
         results.append({
             "symbol": symbol,
+            "name": entry["name"],                   # what the row is labelled with
             "price": float(info.last_price),         # most recent trade price
             "previous": float(info.previous_close),  # yesterday's closing price
             "prices": get_stock_prices(ticker),      # list of prices for the sparkline
@@ -100,14 +133,26 @@ def build_stocks_panel():
         # Honest "as of" time = when the cached data was actually fetched (the cache
         # file's age), not now. Stocks don't refresh from the browser button (that
         # only re-fetches weather); a run re-fetches them once the cache passes 15 min.
-        pieces.append('<p class="updated">As of ' + cached_time_label("stocks")
-                      + ' · re-fetched every ~15 min</p>')
+        # The id lets the browser replace this line with "Live · checked <time>" once it
+        # has fetched fresh prices through the relay.
+        pieces.append('<p class="updated" id="stocks-stamp">From the build at '
+                      + cached_time_label("stocks") + '</p>')
+        # What the browser needs to fetch the same symbols live: the relay's address and
+        # the list. Same pattern as the YouTube panel's yt-live-config.
+        pieces.append('<div id="stocks-live-config" hidden'
+                      ' data-relay="' + html.escape(YOUTUBE_RELAY, quote=True) + '"'
+                      ' data-tickers="' + html.escape(json.dumps(ticker_list()), quote=True)
+                      + '"></div>')
         # The list scrolls inside itself if there are lots of tickers, so the widget
         # stays a fixed compact height (see the CSS for .stocks-list).
-        pieces.append('<div class="stocks-list">')
+        pieces.append('<div class="stocks-list" id="stocks-list">')
 
         # Each entry in "stocks" is one ticker's saved numbers (from fetch_stocks_data).
+        # Only rows for symbols still in config.json — the cache may be from before a change.
+        wanted = [t["symbol"] for t in ticker_list()]
         for row in stocks:
+            if row["symbol"] not in wanted:
+                continue
             symbol = row["symbol"]
             price = row["price"]          # most recent trade price
             previous = row["previous"]    # yesterday's closing price
@@ -127,13 +172,14 @@ def build_stocks_panel():
             chart = sparkline_svg(row["prices"], going_up)
 
             # One card for this stock: symbol, its chart, then the price and change.
-            pieces.append('<div class="stock">')
-            pieces.append('<div class="stock-sym">' + symbol + '</div>')
+            # data-symbol lets the browser find this row to replace it with a live one.
+            pieces.append('<div class="stock" data-symbol="' + html.escape(symbol, quote=True) + '">')
+            pieces.append('<div class="stock-sym">' + html.escape(row.get("name", symbol)) + '</div>')
             pieces.append(chart)
             pieces.append('<div class="stock-nums">')
-            pieces.append('<div class="stock-price">$' + str(round(price, 2)) + '</div>')
+            pieces.append('<div class="stock-price">' + format_price(symbol, price) + '</div>')
             pieces.append('<div class="stock-change" style="color:' + colour + '">'
-                          + sign + str(change) + ' (' + sign + str(percent) + '%)</div>')
+                          + sign + "{:,.2f}".format(change) + ' (' + sign + str(percent) + '%)</div>')
             pieces.append('</div>')
             pieces.append('</div>')
 

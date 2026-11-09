@@ -11,7 +11,8 @@
 # what you see if the relay is down, and they fill in any channel the relay misses.
 #
 # What this panel does NOT do here (it happens in the browser, in template.html's
-# <script>): the live fetch, the ✕ delete button, and the whole "Watch Later" list. Those need to remember your choices between runs, and a static
+# <script>): the live fetch and the ✕ delete button. (There used to be a "Watch Later"
+# list too; Eli had it removed on 2026-11-09.) Those need to remember your choices between runs, and a static
 # HTML file has no server to store them — so they live in the browser's localStorage.
 # Python's job is only to lay out today's videos; JavaScript makes them interactive.
 
@@ -262,8 +263,8 @@ def build_youtube_panel():
                 vid = html.escape(v["video_id"], quote=True)
 
                 # One card. The data-* attributes carry this video's details so the
-                # JavaScript can copy them into the "Watch Later" list when its button
-                # is pressed, and know which video a ✕ press is dismissing.
+                # JavaScript can merge it with live videos, and know which video a ✕
+                # press is dismissing.
                 pieces.append(
                     '<div class="yt-card" data-vid="' + vid + '"'
                     ' data-title="' + title + '"'
@@ -288,9 +289,8 @@ def build_youtube_panel():
                               ' onclick="clearOnOpen(this)">' + title + '</a>')
                 pieces.append('<div class="yt-channel">' + channel + '</div>')
                 pieces.append('<div class="yt-actions">')
-                # Save this card to Watch Later. onclick passes the card element (this)
-                # up to a JS function that reads the data-* attributes above.
-                pieces.append('<button class="yt-save" onclick="saveForLater(this)">+ Watch later</button>')
+                # (The "+ Watch later" button that sat here was removed 2026-11-09 along
+                # with the Watch Later widget, at Eli's request.)
                 # Dismiss just this card, for good (it does not come back at midnight).
                 pieces.append('<button class="yt-remove" onclick="dismissToday(this)" title="Remove">&#10005;</button>')
                 pieces.append('</div>')   # .yt-actions

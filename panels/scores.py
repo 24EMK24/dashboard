@@ -73,11 +73,17 @@ def render_card_shell(team):
     # needs (sport / league / team, e.g. baseball / mlb / sea) plus Eli's own label for
     # the team, so the script can build the address without a second copy of the team
     # list living in template.html.
+    #
+    # Since 2026-11-09 every card starts HIDDEN, and the script shows it only if the team
+    # has a game soon — "soon" being data-show-within-hours, from show_within_hours in
+    # config.json (24 for baseball, 168 = a week for football; 24 if missing). Starting
+    # hidden means an off-season card never flashes up while the page loads.
     pieces = []
-    pieces.append('<div class="score-card"'
+    pieces.append('<div class="score-card" hidden'
                   + ' data-sport="' + html.escape(team.get("sport", "")) + '"'
                   + ' data-league="' + html.escape(team.get("league", "")) + '"'
                   + ' data-team="' + html.escape(team.get("team", "")) + '"'
+                  + ' data-show-within-hours="' + str(int(team.get("show_within_hours", 24))) + '"'
                   + ' data-name="' + html.escape(team.get("name", "")) + '">')
 
     # The heading is filled in now because the team's NAME is ours, not ESPN's — there is
@@ -105,7 +111,8 @@ def build_scores_panel():
         pieces = []
         # data-past-games hands the browser the PAST_GAMES_SHOWN number above, so that
         # setting lives in exactly one place even though two languages use it.
-        pieces.append('<div class="scores-strip" id="scores-strip"'
+        # The strip starts hidden too, and appears once at least one card qualifies.
+        pieces.append('<div class="scores-strip" id="scores-strip" hidden'
                       + ' data-past-games="' + str(PAST_GAMES_SHOWN) + '">')
         for team in SPORTS_TEAMS:
             pieces.append(render_card_shell(team))

@@ -300,10 +300,37 @@ Split into a **`panels/` package** (done at panel three, 2026-07-22). Layout:
 - **`panels/weather.py`** — `build_weather_panel()` (Open-Meteo, Pacific). Its `weather_label`
   / `to_ampm` are MIRRORED by JS in `template.html`; keep the two in sync.
 - **`panels/stocks.py`** — `build_stocks_panel()` (yfinance, cached, sparklines).
-- **`relay/worker.js` — the Cloudflare YouTube relay (added 2026-11-09).** YouTube's feed
-  sends **no `Access-Control-Allow-Origin`**, so a browser cannot read it; this ~40-line
-  Worker fetches `?channel_id=UC…` from YouTube and hands it back with that header (refusing
-  anything that is not a channel id). It runs on **Cloudflare, not GitHub** — editing the file
+- **SINCE 2026-11-09 THE WHOLE PAGE IS LIVE IN THE BROWSER; the build is the backup.**
+  On load and on "Refresh everything": `refreshScores` (ESPN, direct), `refreshShabbat`
+  (Hebcal, direct), and through the relay `refreshYouTube`, `refreshNews`, `refreshStocks`.
+  Each relay widget **merges or replaces per item and keeps the build's version of any item
+  the relay misses**, and its stamp says how many answered. The news grouping in
+  `template.html` (`significantWords`/`sameStory`/`clusterStories`) is a TRANSLATION of
+  `panels/news.py` — change both or neither. Same for `sparklineSvg` vs `sparkline_svg`.
+  **Page order (Eli):** score strip and candle strip on top (each only when relevant), then
+  YouTube, News, Stocks, Weather last. **Watch Later was removed** (its old localStorage key
+  `yt_watch_later_v1` is left alone in the browser).
+- **Score cards are hidden unless a game is soon** (`teamCardShouldShow`): live, or the next
+  game within the team's `show_within_hours` (config.json: Mariners 24, Seahawks 168), or the
+  last game started under 16 h ago (`JUST_PLAYED_HOURS`, to see the final). Cards and the strip
+  are emitted with `hidden` and revealed by the script. A global `[hidden]{display:none
+  !important}` rule exists because `.scores-strip{display:flex}` would otherwise beat the
+  attribute. An ESPN failure SHOWS the card ("Scores unavailable") rather than hiding it.
+- **Candle lighting: Hebcal, NOT MyZmanim** (Eli asked for MyZmanim; its API needs a paid
+  account + a key that would sit in the public page). Hebcal is keyless and sends CORS, so
+  the browser calls it directly. Shown from the start of the day before the first candle
+  lighting until the next Havdalah passes, candle lighting AND Havdalah together (Eli can't
+  use his phone on Shabbat). Multi-day Yom Tov lists every candle lighting in the run.
+- **Stocks are the S&P 500 (`^GSPC`) and Nasdaq (`^IXIC`)**; `tickers` entries are now
+  `{name, symbol}` (plain strings still accepted). An index shows no `$`.
+- **Location is Seattle 98125, rounded to 47.72, -122.30** (2 decimals, per the privacy rule).
+- **`relay/worker.js` — the Cloudflare relay (added 2026-11-09), live at
+  `https://yt-relay.24emk24.workers.dev`.** YouTube, Google News and Yahoo all send **no
+  `Access-Control-Allow-Origin`**, so a browser cannot read them; the Worker answers exactly
+  three request shapes — `?channel_id=UC…`, `?news=<query>` (empty = top stories) and
+  `?stock=<symbol>&range=1d|5d` — and refuses anything else. **Eli's Cloudflare account; the
+  subdomain was renamed from his Gmail name to `24emk24` because the address is public.** A
+  new `workers.dev` subdomain refuses TLS for a few minutes while its certificate is issued. It runs on **Cloudflare, not GitHub** — editing the file
   here changes nothing until it is pasted into the Cloudflare dashboard again. Its address
   goes in `config.json` as **`youtube_relay`** (empty = no relay; the page then shows only the
   build's cards and the Refresh button does not mention videos). Why: the build step measured

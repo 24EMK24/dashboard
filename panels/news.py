@@ -45,8 +45,14 @@ from zoneinfo import ZoneInfo
 # when Google throttles a fetch.
 from panels.common import (
     NEWS_SUBJECTS, get_cached, cached_time_label, CACHE_DIR, CACHE_MAX_AGE,
-    fetch_in_parallel,
+    fetch_in_parallel, YOUTUBE_RELAY,
 )
+
+# SINCE 2026-11-09 THESE HEADLINES ARE THE BACKUP, NOT THE MAIN SOURCE. The page's
+# JavaScript asks Google News again (through the Cloudflare relay, relay/worker.js) every
+# time it opens, and redraws each subject from fresh headlines using a translation of the
+# grouping below (significantWords / sameStory / clusterStories in template.html — KEEP THE
+# TWO IN STEP). A subject the relay could not get keeps the group this file drew.
 
 # A normal browser User-Agent, so Google News serves the feed instead of throttling us.
 USER_AGENT = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
@@ -296,14 +302,29 @@ def build_news_panel():
     try:
         # Every subject's items, THROUGH THE CACHE (re-fetched at most every ~15 minutes).
         subjects = get_cached("news", fetch_news_data, CACHE_MAX_AGE)
+        # Keep only subjects still in config.json, in config.json's order — the cache may
+        # be from before a subject was added or removed.
+        by_name = {s["name"]: s for s in subjects}
+        subjects = [by_name.get(s.get("name", "News"),
+                                {"name": s.get("name", "News"), "query": s.get("query", ""), "items": []})
+                    for s in NEWS_SUBJECTS]
 
         pieces = []
         pieces.append("<h2>News</h2>")
         # Honest "as of" stamp, like stocks/YouTube — the browser can't refresh this, so it
         # updates when Python re-runs. Notes the corroboration caveat AND that this is a
         # today-only, clean-slate-each-day widget (same as YouTube's "New Today").
-        pieces.append('<p class="updated">Today · as of ' + cached_time_label("news")
+        # The id lets the browser replace this line once it has fetched live headlines.
+        pieces.append('<p class="updated" id="news-stamp">Today · from the build at '
+                      + cached_time_label("news")
                       + ' · ✓ = how many outlets ran it (a rough signal, not proof)</p>')
+        # What the browser needs to fetch the same subjects live: the relay's address, the
+        # subject list, and how many stories to show per subject.
+        pieces.append('<div id="news-live-config" hidden'
+                      ' data-relay="' + html.escape(YOUTUBE_RELAY, quote=True) + '"'
+                      ' data-per-subject="' + str(STORIES_PER_SUBJECT) + '"'
+                      ' data-subjects="' + html.escape(json.dumps(NEWS_SUBJECTS), quote=True)
+                      + '"></div>')
 
         # The scroll box holding every subject group. Its id lets the JavaScript find it to
         # hide stories you've dismissed today.
@@ -335,7 +356,9 @@ def build_news_panel():
             # Each subject is its own group: a heading plus today's stories (or a short
             # "nothing today" note). Wrapping them lets the JS show that note again if you
             # delete every story in a group.
-            pieces.append('<div class="news-subject">')
+            # data-subject lets the browser find this group to replace it with a live one.
+            pieces.append('<div class="news-subject" data-subject="'
+                          + html.escape(subject["name"], quote=True) + '">')
             # Subject heading (always shown, so you can see the subject is being watched
             # even on a quiet day). When there ARE stories to clear it also carries a ✕,
             # which dismisses every headline showing under this subject in one press —
@@ -388,10 +411,13 @@ def build_news_panel():
 
         pieces.append('</div>')   # .news-list
 
-        if not any_content:
-            # No subjects configured, or nothing published today across every subject.
-            return ('<h2>News</h2><p class="news-empty">No news yet today. '
-                    'Check back later, or add subjects in config.json.</p>')
+        if not subjects:
+            # No subjects configured at all.
+            return ('<h2>News</h2><p class="news-empty">No news subjects. '
+                    'Add some in config.json.</p>')
+        # (When subjects exist but nothing was published today, the groups above each say
+        # "Nothing today." — and, unlike a single short message, they keep the structure
+        # the browser needs to fill them in live. any_content is kept only for reading.)
 
         return "\n".join(pieces)
 
