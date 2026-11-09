@@ -334,8 +334,10 @@ Split into a **`panels/` package** (done at panel three, 2026-07-22). Layout:
   new `workers.dev` subdomain refuses TLS for a few minutes while its certificate is issued.
   **GOOGLE NEWS REFUSES MOST CLOUDFLARE EGRESS (503)** — measured 2026-11-09: ~1 subject in
   10 gets through even with the 4-attempt retry `?news=` uses, and each failure costs 7–37 s.
-  YouTube and Yahoo work fine through it. So live news mostly falls back to the build; a
-  decision on another source or reverting is open (see `.planning/`). It runs on **Cloudflare, not GitHub** — editing the file
+  YouTube and Yahoo work fine through it. **So live news is SWITCHED OFF (Eli, 2026-11-09):
+  `NEWS_LIVE = False` in `panels/news.py`; news comes from the build as before.** The
+  browser code and the `?news=` route stay, dormant, for a future source that doesn't block
+  Cloudflare. The button then reads "Refresh all but news". It runs on **Cloudflare, not GitHub** — editing the file
   here changes nothing until it is pasted into the Cloudflare dashboard again. Its address
   goes in `config.json` as **`youtube_relay`** (empty = no relay; the page then shows only the
   build's cards and the Refresh button does not mention videos). Why: the build step measured

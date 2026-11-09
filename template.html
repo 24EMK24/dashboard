@@ -444,14 +444,16 @@ async function refreshWeather() {
 // strip is for. A button labelled just "Refresh" quietly promises more than it can
 // deliver, so it names the things it genuinely does — and refreshLabel() only adds
 // "videos" when the relay is actually set up.
-// Since the second round on 2026-11-09, with the relay set up, EVERY widget refreshes
-// live — videos, news and stocks through the relay; weather, scores and candle lighting
-// directly — so the button can honestly say "everything".
+// With the relay set up, videos and stocks refresh live through it, and weather, scores
+// and candle lighting directly. News refreshes live only if its relay switch is on
+// (NEWS_LIVE in panels/news.py — OFF since 2026-11-09, because Google News refuses
+// Cloudflare). The label says exactly which, so it never promises a refresh it can't do.
 function refreshLabel() {
   const box = document.getElementById("yt-live-config");
   const hasRelay = !!(box && box.dataset.relay);
-  return hasRelay ? "Refresh everything &#8635;"
-                  : "Refresh weather &amp; scores &#8635;";
+  if (!hasRelay) return "Refresh weather &amp; scores &#8635;";
+  return relayFrom("news-live-config") ? "Refresh everything &#8635;"
+                                       : "Refresh all but news &#8635;";
 }
 
 // The fetches are started TOGETHER with Promise.all rather than one after the other, so
@@ -1738,7 +1740,7 @@ window.addEventListener("DOMContentLoaded", function () {
   refreshScores();       // ESPN (direct)
   refreshShabbat();      // Hebcal (direct)
   refreshYouTube();      // through the relay
-  refreshNews();         // through the relay
+  refreshNews();         // through the relay — does nothing while NEWS_LIVE is off
   refreshStocks();       // through the relay
 });
 

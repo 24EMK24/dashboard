@@ -48,11 +48,15 @@ from panels.common import (
     fetch_in_parallel, YOUTUBE_RELAY,
 )
 
-# SINCE 2026-11-09 THESE HEADLINES ARE THE BACKUP, NOT THE MAIN SOURCE. The page's
-# JavaScript asks Google News again (through the Cloudflare relay, relay/worker.js) every
-# time it opens, and redraws each subject from fresh headlines using a translation of the
-# grouping below (significantWords / sameStory / clusterStories in template.html — KEEP THE
-# TWO IN STEP). A subject the relay could not get keeps the group this file drew.
+# LIVE NEWS IS SWITCHED OFF (Eli, 2026-11-09: "put it back on the build, it's fine").
+# The page CAN redraw news live through the Cloudflare relay (refreshNews in template.html,
+# using a translation of the grouping below), but Google News refuses most of Cloudflare's
+# machines — about 1 subject in 10 got through, and each refusal cost up to ~35 seconds of
+# "Checking the news…". So news comes from the build, as it always did.
+# To try live news again (e.g. with a source that doesn't block Cloudflare), set this True.
+# The browser only fetches live when the relay address is handed to it, so False = no
+# live fetch, no waiting, no "Couldn't reach" message.
+NEWS_LIVE = False
 
 # A normal browser User-Agent, so Google News serves the feed instead of throttling us.
 USER_AGENT = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
@@ -320,8 +324,10 @@ def build_news_panel():
                       + ' · ✓ = how many outlets ran it (a rough signal, not proof)</p>')
         # What the browser needs to fetch the same subjects live: the relay's address, the
         # subject list, and how many stories to show per subject.
+        # data-relay is left EMPTY while NEWS_LIVE is False — that is the off switch.
+        relay_for_news = YOUTUBE_RELAY if NEWS_LIVE else ""
         pieces.append('<div id="news-live-config" hidden'
-                      ' data-relay="' + html.escape(YOUTUBE_RELAY, quote=True) + '"'
+                      ' data-relay="' + html.escape(relay_for_news, quote=True) + '"'
                       ' data-per-subject="' + str(STORIES_PER_SUBJECT) + '"'
                       ' data-subjects="' + html.escape(json.dumps(NEWS_SUBJECTS), quote=True)
                       + '"></div>')
