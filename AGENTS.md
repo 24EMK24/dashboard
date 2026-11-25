@@ -169,8 +169,23 @@ Split into a **`panels/` package** (done at panel three, 2026-07-22). Layout:
   ever comes back, check the same field again rather than guessing a number.
   Steps: checkout → `setup-python` 3.12 (pip cached) → `pip install -r requirements.txt` →
   **restore `cache/`** → `python main.py` → **save `cache/`** → copy `dashboard.html` to
-  `_site/index.html` → `upload-pages-artifact` → `deploy-pages`. `timeout-minutes: 20`,
-  `concurrency: pages`. **The `actions/cache` steps are not optional decoration:** every run
+  `_site/index.html` → `upload-pages-artifact` → `deploy-pages` **(with one retry, below)**.
+  `timeout-minutes: 20`, `concurrency: pages`.
+  **THE PUBLISH STEP RETRIES ONCE AFTER 60 s (added 2026-11-24, `24cf9bc`) — do not remove
+  it.** From 2026-11-09 GitHub began failing `deploy-pages` with *"No artifacts named
+  github-pages were found for this workflow run"* one second after the upload stored it
+  (the artifact was present on every failed run). 4 failures on 2026-11-24 alone, each one
+  throwing the whole build away. The first `deploy-pages` (id `deployment`) has
+  `continue-on-error: true`; a `sleep 60` step and a second `deploy-pages` (id
+  `deployment_retry`) run only `if: steps.deployment.outcome == 'failure'`. **Because of
+  `continue-on-error`, a failed first attempt still shows "success" in the step list** — the
+  tell is whether the wait step ran, and the run's annotations (public, at
+  `/check-runs/<job id>/annotations`). If runs ever fail at the second try, add another
+  wait/retry pair rather than anything cleverer.
+  **The build step itself sometimes stalls for many minutes** (16 min on run #1847,
+  2026-11-24; three 20-minute kills on 2026-11-16) when a warm build is ~1 s. Prime
+  suspect: `panels/weather.py`'s `requests.get` has no `timeout`, unlike every other fetch.
+  **The `actions/cache` steps are not optional decoration:** every run
   gets a brand-new empty runner, and the throttle carry-forward in `youtube.py`/`news.py`
   works by reading the PREVIOUS `cache/*.json` — without restore/save that protection would
   silently not exist. `cache/` stays gitignored (committing it would mean ~48 junk commits a
@@ -344,6 +359,12 @@ Split into a **`panels/` package** (done at panel three, 2026-07-22). Layout:
   **5 s in the morning and 230–270 s in the evening** — YouTube throttles GitHub's shared
   runners at busy hours and throttled channels fall back to carried-forward data, which is
   how videos went missing. More rebuilds cannot fix that; asking from the browser does.
+  **Cloudflare may keep only SUCCESSFUL answers** (2026-11-24, `28a6e92`):
+  `cacheTtlByStatus: {"200-299": maxAge, "400-599": 0}`. The earlier blanket `cacheTtl` +
+  `cacheEverything` kept any answer for 10 minutes — refusals included — and PointlessHub
+  sat at a YouTube 429 through the relay 5 times out of 5 while the laptop fetched it fine;
+  it went to 28/28 the moment this was deployed. **Never go back to a plain `cacheTtl`.**
+  Attempts per request: channel feeds 3, news 4, stocks 1.
   **The page MERGES live videos into the build's cards, never replaces them**, so a channel
   the relay misses keeps what the build had. `refreshYouTube()` in `template.html` runs on
   page load and from the Refresh button; the stamp says honestly how many channels answered.
@@ -476,6 +497,9 @@ impossible; kept here so the symptom is recognised if it ever resurfaces in anot
    are NOT public: `/actions/runs/<run_id>/logs` returns 403 without a token.** Any plan
    that depends on "push a print statement and read the public log" therefore needs Eli to
    open it in a browser — worth knowing before proposing one.
+   **A failed run is usually not a failed build** — check WHICH step failed in `/jobs`.
+   Since 2026-11 it has mostly been the publish step (see the retry note above), and the
+   page simply stays at the last successful run.
    **Check the GAPS between runs, not just their conclusions** — the 2026-07-27 problem was 12
    consecutive *successful* runs spread over 24.5 hours, because GitHub silently drops
    scheduled runs on free public repos under load. Nothing looks broken when this happens; the
