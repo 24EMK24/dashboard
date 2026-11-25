@@ -55,7 +55,8 @@ function textReply(message, status) {
 // Fetch one address and pass the answer back with the permission header attached.
 // Shared by all three kinds of request, so they behave identically.
 //
-// `attempts` is how many times to ask before giving up. Google News refuses MANY of
+// `attempts` is how many times to ask before giving up (YouTube: 3, news: 4, stocks: 1).
+// Google News refuses MANY of
 // Cloudflare's machines with a 503 but not all of them (measured 2026-11-09: the same
 // request failed, then worked, then failed again over three minutes, while the laptop got
 // through every time). Each new attempt can go out from a different machine, so trying
@@ -68,9 +69,21 @@ async function relay(targetUrl, contentType, maxAgeSeconds, attempts) {
       // The "cf" part asks Cloudflare to keep a copy and reuse it for a while, so many
       // page loads cost the real site only one request. (If Cloudflare declines to keep
       // it, everything still works — just with more asking.)
+      //
+      // ONLY A GOOD ANSWER IS KEPT (changed 2026-11-24). This used to be a single
+      // "cacheTtl", which told Cloudflare to keep the answer for 10 minutes WHATEVER it
+      // was — so one refusal from YouTube could be kept and handed back as if it were
+      // fresh, and every retry below would just get the same saved refusal. Measured that
+      // day: PointlessHub failed 5 times out of 5 through the relay with "429" (YouTube's
+      // "too many requests") while the laptop fetched the same feed fine every time.
+      // "200-299" is every kind of success; anything from 400 up is a refusal or an
+      // error, and 0 means "do not reuse it — ask again next time".
       reply = await fetch(targetUrl, {
         headers: { "User-Agent": USER_AGENT },
-        cf: { cacheTtl: maxAgeSeconds, cacheEverything: true },
+        cf: {
+          cacheEverything: true,
+          cacheTtlByStatus: { "200-299": maxAgeSeconds, "400-599": 0 },
+        },
       });
       if (reply.ok) break;                    // got it — stop trying
       lastError = "The site answered " + reply.status;
@@ -110,8 +123,10 @@ export default {
       if (!CHANNEL_ID_PATTERN.test(channelId)) {
         return textReply("Expected ?channel_id=UC… (a YouTube channel id)", 400);
       }
+      // Up to 3 tries (since 2026-11-24): YouTube sometimes refuses one channel from
+      // Cloudflare with a 429 while answering the rest — see the note in relay().
       return relay("https://www.youtube.com/feeds/videos.xml?channel_id=" + channelId,
-                   "text/xml; charset=UTF-8", FEED_MAX_AGE_SECONDS);
+                   "text/xml; charset=UTF-8", FEED_MAX_AGE_SECONDS, 3);
     }
 
     // 2. Google News. An empty search means the general top-stories feed — the same rule
