@@ -70,7 +70,8 @@ jobs:
     # published URL on the run's summary page.
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      # Whichever publish attempt worked (see step 8) — "||" means "or, if that is empty".
+      url: ${{ steps.deployment.outputs.page_url || steps.deployment_retry.outputs.page_url }}
 
     # A healthy build is ~2 minutes. If a run is still going after 20 the feeds
     # are badly throttled and it is stuck — kill it rather than let it hang.
@@ -156,6 +157,26 @@ jobs:
         with:
           path: _site
 
+      # 8. Publish — with ONE retry, added 2026-11-24.
+      #    WHY: GitHub sometimes cannot find the package step 7 uploaded one second earlier
+      #    ("No artifacts named github-pages were found for this workflow run"), although it
+      #    is there — the run's artifact list shows it. It is a delay on GitHub's side, not a
+      #    fault in the page. It happened 8 times in two weeks and 4 times on 2026-11-24, and
+      #    each time the WHOLE build was thrown away: the live page stayed frozen at the last
+      #    good run, so the news (which only comes from the build) went 8+ hours stale.
+      #    "continue-on-error: true" lets the job carry on when the first attempt fails, so
+      #    the two steps after it can wait a minute and try once more. If the second try
+      #    also fails, THAT step fails and the run is marked as failed, as it should be.
       - name: Publish to GitHub Pages
         id: deployment
+        continue-on-error: true
+        uses: actions/deploy-pages@v5
+
+      - name: Wait a minute before trying to publish again
+        if: steps.deployment.outcome == 'failure'
+        run: sleep 60
+
+      - name: Publish to GitHub Pages (second try)
+        id: deployment_retry
+        if: steps.deployment.outcome == 'failure'
         uses: actions/deploy-pages@v5
